@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ALM Octane Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      padding: 14px 24px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2a2d3d;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    header .logo {
+      height: 28px;
+      width: auto;
+      display: flex;
+      align-items: center;
+    }
+
+    header .logo img {
+      height: 28px;
+      width: auto;
+    }
+
+    header .divider {
+      width: 1px;
+      height: 20px;
+      background: #2a2d3d;
+      margin: 0 4px;
+    }
+
+    header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+    header span { font-size: 12px; color: #6b7280; margin-left: 4px; }
+
+    #chat-window {
+      flex: 1;
+      width: 100%;
+      max-width: 800px;
+      overflow-y: auto;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+    }
+
+    .msg.user { align-self: flex-end; align-items: flex-end; }
+    .msg.agent { align-self: flex-start; align-items: flex-start; }
+
+    .msg .label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .msg .bubble {
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .msg.user .bubble {
+      background: #6366f1;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.agent .bubble {
+      background: #1e2130;
+      color: #e0e0e0;
+      border: 1px solid #2a2d3d;
+      border-bottom-left-radius: 4px;
+    }
+
+    .msg.agent .bubble.error {
+      background: #2d1b1b;
+      border-color: #7f1d1d;
+      color: #fca5a5;
+    }
+
+    .msg.agent .bubble.loading {
+      color: #6b7280;
+      font-style: italic;
+    }
+
+    .msg .bubble pre {
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 12px;
+      font-family: "Fira Code", "Cascadia Code", monospace;
+      margin-top: 8px;
+    }
+
+    #input-area {
+      width: 100%;
+      max-width: 800px;
+      padding: 16px;
+      flex-shrink: 0;
+    }
+
+    #input-form {
+      display: flex;
+      gap: 10px;
+      background: #1e2130;
+      border: 1px solid #2a2d3d;
+      border-radius: 16px;
+      padding: 10px 14px;
+      transition: border-color 0.2s;
+    }
+
+    #input-form:focus-within { border-color: #6366f1; }
+
+    #msg-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #e0e0e0;
+      font-size: 14px;
+      resize: none;
+      max-height: 150px;
+      line-height: 1.5;
+    }
+
+    #msg-input::placeholder { color: #4b5563; }
+
+    #send-btn {
+      background: #6366f1;
+      border: none;
+      border-radius: 10px;
+      width: 36px; height: 36px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      align-self: flex-end;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    #send-btn:hover { background: #4f46e5; }
+    #send-btn:active { transform: scale(0.95); }
+    #send-btn:disabled { background: #374151; cursor: not-allowed; }
+
+    #send-btn svg { width: 18px; height: 18px; fill: white; }
+
+    .hint {
+      font-size: 11px;
+      color: #374151;
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    /* Empty state */
+    #empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: #4b5563;
+      text-align: center;
+      padding: 40px;
+    }
+
+    #empty-state .icon { font-size: 48px; }
+    #empty-state h2 { font-size: 18px; font-weight: 600; color: #6b7280; }
+    #empty-state p { font-size: 13px; line-height: 1.6; }
+
+    .agentspace-note {
+      font-size: 11px;
+      color: #4b5563;
+      background: #1a1d27;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-top: 8px;
+      text-align: left;
+      max-width: 480px;
+    }
+    .agentspace-note strong { color: #6b7280; }
+
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .chip {
+      background: #1e2130;
+      border: 1px solid #2a2d3d;
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 12px;
+      color: #9ca3af;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .chip:hover { border-color: #6366f1; color: #a5b4fc; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2d3d; border-radius: 3px; }
+
+    /* Settings gear button */
+    #settings-btn {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      width: 36px; height: 36px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #6b7280;
+      font-size: 18px;
+      transition: border-color 0.2s, color 0.2s;
+      flex-shrink: 0;
+    }
+    #settings-btn:hover { border-color: #6366f1; color: #a5b4fc; }
+
+    /* Settings modal overlay */
+    #settings-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    #settings-overlay.open { display: flex; }
+
+    #settings-modal {
+      background: #1a1d27;
+      border: 1px solid #2a2d3d;
+      border-radius: 16px;
+      padding: 28px 32px;
+      width: 420px;
+      max-width: calc(100vw - 48px);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    #settings-modal h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #e0e0e0;
+      margin: 0;
+    }
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .setting-group label {
+      font-size: 12px;
+      color: #6b7280;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+
+    .setting-group input {
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .setting-group input:focus { border-color: #6366f1; }
+    .setting-group input::placeholder { color: #374151; }
+
+    .settings-hint {
+      font-size: 11px;
+      color: #4b5563;
+      margin-top: 2px;
+    }
+
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+
+    #settings-cancel {
+      background: transparent;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 8px 18px;
+      color: #6b7280;
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    #settings-cancel:hover { border-color: #6366f1; color: #a5b4fc; }
+
+    #settings-save {
+      background: #6366f1;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #settings-save:hover { background: #4f46e5; }
+    #settings-save:disabled { background: #374151; cursor: not-allowed; }
+
+    #settings-status {
+      font-size: 12px;
+      min-height: 18px;
+      text-align: center;
+    }
+    #settings-status.ok  { color: #6ee7b7; }
+    #settings-status.err { color: #fca5a5; }
+
+    /* Toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .toggle-row .toggle-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .toggle-row .toggle-label span { font-size: 13px; color: #e0e0e0; font-weight: 500; }
+    .toggle-row .toggle-label small { font-size: 11px; color: #4b5563; }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #374151;
+      border-radius: 24px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .slider:before {
+      content: '';
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 3px; top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .switch input:checked + .slider { background: #6366f1; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .switch input:disabled + .slider { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <img src="/static/OTEX_BIG.svg" alt="OpenText" />
+  </div>
+  <div class="divider"></div>
+  <h1>Octane ALM Agent</h1>
+  <span>A2A Wrapper</span>
+  <button id="settings-btn" title="Octane connection settings" onclick="openSettings()">⚙</button>
+</header>
+
+<!-- Settings Modal -->
+<div id="settings-overlay" onclick="overlayClick(event)">
+  <div id="settings-modal">
+    <h2>⚙ Octane Connection</h2>
+    <div class="setting-group">
+      <label>OCTANE SERVER URL</label>
+      <input id="cfg-url" type="text" placeholder="http://localhost:8080" />
+      <span class="settings-hint">Base URL of the Octane MCP server (without /mcp)</span>
+    </div>
+    <div class="setting-group">
+      <label>API TOKEN</label>
+      <input id="cfg-key" type="password" placeholder="Enter new token (leave blank to keep current)" />
+      <span class="settings-hint" id="cfg-key-hint"></span>
+    </div>
+    <div style="display:flex;gap:12px">
+      <div class="setting-group" style="flex:1">
+        <label>SHARED SPACE ID</label>
+        <input id="cfg-ss" type="number" min="1" placeholder="e.g. 1001" />
+      </div>
+      <div class="setting-group" style="flex:1">
+        <label>WORKSPACE ID</label>
+        <input id="cfg-ws" type="number" min="1" placeholder="e.g. 1002" />
+      </div>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Use Gemini AI</span>
+        <small id="gemini-toggle-hint">Enable LLM-powered responses</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="cfg-gemini" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="settings-status"></div>
+    <div class="settings-actions">
+      <button id="settings-cancel" onclick="closeSettings()">Cancel</button>
+      <button id="settings-save" onclick="saveSettings()">Save &amp; Apply</button>
+    </div>
+  </div>
+</div>
+
+<div id="chat-window">
+  <div id="empty-state">
+    <div class="icon">🤖</div>
+    <h2>Octane ALM Agent</h2>
+    <p>Ask me about defects, stories, features, comments, or your work items in Octane. Powered by Gemini AI.</p>
+    <div class="suggestion-chips">
+      <div class="chip" onclick="sendChip(this)">Get defect 2110</div>
+      <div class="chip" onclick="sendChip(this)">Show my work items</div>
+      <div class="chip" onclick="sendChip(this)">Get comments on defect 2110</div>
+      <div class="chip" onclick="sendChip(this)">Get story 1234</div>
+      <div class="chip" onclick="sendChip(this)">Get feature 500</div>
+      <div class="chip" onclick="sendChip(this)">Add comment to defect 2110 saying "Under investigation"</div>
+    </div>
+    <div class="agentspace-note">
+      <strong>Also available in Google AgentSpace:</strong> Register this agent at
+      <code style="font-size:10px;color:#9ca3af">vertexaisearch.cloud.google.com</code>
+      and invoke it with <code style="font-size:10px;color:#9ca3af">@Octane ALM Agent</code> from any AgentSpace conversation.
+      See <a href="https://github.com" style="color:#6366f1;text-decoration:none">README.md</a> for setup steps.
+    </div>
+  </div>
+</div>
+
+<div id="input-area">
+  <form id="input-form" onsubmit="handleSubmit(event)">
+    <textarea
+      id="msg-input"
+      rows="1"
+      placeholder="Ask about defects, stories, features, comments, or your work items…"
+      onkeydown="handleKey(event)"
+      oninput="autoResize(this)"
+    ></textarea>
+    <button id="send-btn" type="submit" title="Send (Enter)">
+      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </form>
+  <p class="hint">Enter to send · Shift+Enter for new line</p>
+</div>
+
+<script>
+  const chatWindow = document.getElementById('chat-window');
+  const emptyState = document.getElementById('empty-state');
+  const msgInput = document.getElementById('msg-input');
+  const sendBtn = document.getElementById('send-btn');
+  let msgCounter = 1;
+
+  // Stable context ID for the whole browser session — enables multi-turn memory
+  const SESSION_CONTEXT_ID = 'ctx-' + Math.random().toString(36).slice(2) + Date.now();
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('input-form').dispatchEvent(new Event('submit'));
+    }
+  }
+
+  function sendChip(chip) {
+    msgInput.value = chip.textContent;
+    document.getElementById('input-form').dispatchEvent(new Event('submit'));
+  }
+
+  function appendMessage(role, text, extra = {}) {
+    if (emptyState) emptyState.remove();
+
+    const div = document.createElement('div');
+    div.classList.add('msg', role);
+    if (extra.id) div.id = extra.id;
+
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = role === 'user' ? 'You' : 'Agent';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble' + (extra.loading ? ' loading' : '') + (extra.error ? ' error' : '');
+
+    // Try to pretty-print JSON content
+    if (role === 'agent' && !extra.loading && !extra.error) {
+      bubble.innerHTML = renderContent(text);
+    } else {
+      bubble.textContent = text;
+    }
+
+    div.appendChild(label);
+    div.appendChild(bubble);
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return div;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function renderText(text) {
+    // Convert newlines to <br>, bold **word**, bullet lines starting with -
+    let html = escapeHtml(text);
+    // bold: **text**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // bullet lines
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+    // line breaks
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
+  function renderArtifact(artifact) {
+    // Render a collapsible raw-data block
+    const parts = artifact.parts || [];
+    let content = '';
+    for (const p of parts) {
+      if (p.data !== undefined) {
+        content = JSON.stringify(p.data, null, 2);
+      } else if (p.text) {
+        content = p.text;
+      }
+    }
+    if (!content) return '';
+    const name = artifact.name || 'Raw data';
+    return `<details style="margin-top:10px">
+  <summary style="cursor:pointer;color:#6b7280;font-size:12px">${escapeHtml(name)}</summary>
+  <pre>${escapeHtml(content)}</pre>
+</details>`;
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const text = msgInput.value.trim();
+    if (!text) return;
+
+    msgInput.value = '';
+    msgInput.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    appendMessage('user', text);
+    const loadingEl = appendMessage('agent', 'Thinking…', { loading: true, id: 'loading-msg' });
+
+    try {
+      const payload = {
+        message: {
+          messageId: 'msg-' + (msgCounter++),
+          contextId: SESSION_CONTEXT_ID,
+          role: 'ROLE_USER',
+          parts: [{ text }]
+        },
+        configuration: { blocking: true }
+      };
+
+      const res = await fetch('/message:send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      loadingEl.remove();
+
+      if (!res.ok) {
+        const errText = await res.text();
+        appendMessage('agent', `Error ${res.status}: ${errText}`, { error: true });
+        return;
+      }
+
+      const data = await res.json();
+      renderReply(data);
+
+    } catch (err) {
+      loadingEl.remove();
+      appendMessage('agent', 'Network error: ' + err.message, { error: true });
+    } finally {
+      sendBtn.disabled = false;
+      msgInput.focus();
+    }
+  }
+
+  function renderReply(data) {
+    // A2A TaskResponse: { task: { status: { message: { parts } }, artifacts: [...] } }
+    const task = data.task || data;
+
+    // 1. Prefer the natural-language summary from status.message (Gemini path)
+    let summaryHtml = '';
+    const statusParts = task?.status?.message?.parts || [];
+    for (const p of statusParts) {
+      if (p.text) { summaryHtml = renderText(p.text); break; }
+    }
+
+    // 2. Artifact collapsibles (raw data)
+    let artifactsHtml = '';
+    if (task.artifacts && task.artifacts.length > 0) {
+      // If there's no Gemini summary, fall back to showing the artifact data as text
+      if (!summaryHtml) {
+        const parts = task.artifacts[0].parts || [];
+        for (const p of parts) {
+          if (p.data !== undefined) {
+            summaryHtml = '<pre>' + escapeHtml(JSON.stringify(p.data, null, 2)) + '</pre>';
+            break;
+          } else if (p.text) {
+            summaryHtml = renderText(p.text);
+            break;
+          }
+        }
+        // Remaining artifacts as collapsibles
+        for (let i = 1; i < task.artifacts.length; i++) {
+          artifactsHtml += renderArtifact(task.artifacts[i]);
+        }
+      } else {
+        // Summary exists — render all artifacts as collapsibles
+        for (const a of task.artifacts) {
+          artifactsHtml += renderArtifact(a);
+        }
+      }
+    }
+
+    if (!summaryHtml) summaryHtml = escapeHtml(JSON.stringify(data, null, 2) );
+
+    if (emptyState) emptyState.remove();
+    const div = document.createElement('div');
+    div.classList.add('msg', 'agent');
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'Agent';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = summaryHtml + artifactsHtml;
+    div.appendChild(label);
+    div.appendChild(bubble);
+    chatWindow.appendChild(div);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  // ── Settings panel ─────────────────────────────────────────────
+  async function openSettings() {
+    const overlay = document.getElementById('settings-overlay');
+    const statusEl = document.getElementById('settings-status');
+    const keyInput = document.getElementById('cfg-key');
+    const keyHint = document.getElementById('cfg-key-hint');
+    statusEl.textContent = '';
+    statusEl.className = '';
+    keyInput.value = '';
+    overlay.classList.add('open');
+    try {
+      const res = await fetch('/config');
+      if (res.ok) {
+        const cfg = await res.json();
+        document.getElementById('cfg-url').value = cfg.octane_url || '';
+        document.getElementById('cfg-ss').value = cfg.shared_space_id ?? '';
+        document.getElementById('cfg-ws').value = cfg.workspace_id ?? '';
+        keyHint.textContent = cfg.api_key_set
+          ? `Current token ends in: ${cfg.api_key_masked.slice(-4)}`
+          : 'No token configured';
+        const toggle = document.getElementById('cfg-gemini');
+        const hint   = document.getElementById('gemini-toggle-hint');
+        toggle.checked  = cfg.gemini_enabled;
+        toggle.disabled = false;
+        if (!cfg.gemini_api_key_set) {
+          hint.textContent = 'No GEMINI_API_KEY — ON uses keyword fallback';
+        } else {
+          hint.textContent = cfg.gemini_enabled ? 'LLM responses active' : 'Using keyword fallback';
+        }
+      }
+    } catch (_) {
+      keyHint.textContent = 'Could not load current config';
+    }
+  }
+
+  function closeSettings() {
+    document.getElementById('settings-overlay').classList.remove('open');
+  }
+
+  function overlayClick(e) {
+    if (e.target === document.getElementById('settings-overlay')) closeSettings();
+  }
+
+  async function saveSettings() {
+    const saveBtn = document.getElementById('settings-save');
+    const statusEl = document.getElementById('settings-status');
+    const url = document.getElementById('cfg-url').value.trim();
+    const key = document.getElementById('cfg-key').value;
+    const ss  = document.getElementById('cfg-ss').value.trim();
+    const ws  = document.getElementById('cfg-ws').value.trim();
+
+    if (!url) {
+      statusEl.textContent = 'Octane Server URL is required.';
+      statusEl.className = 'err';
+      return;
+    }
+
+    saveBtn.disabled = true;
+    statusEl.textContent = 'Saving…';
+    statusEl.className = '';
+
+    const body = { octane_url: url };
+    if (key) body.api_key = key;
+    if (ss)  body.shared_space_id = parseInt(ss, 10);
+    if (ws)  body.workspace_id    = parseInt(ws, 10);
+    const toggle = document.getElementById('cfg-gemini');
+    if (!toggle.disabled) body.gemini_enabled = toggle.checked;
+
+    try {
+      const res = await fetch('/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        statusEl.textContent = '✓ Saved! MCP client reconnected.';
+        statusEl.className = 'ok';
+        document.getElementById('cfg-key-hint').textContent =
+          data.api_key_masked ? `Token ends in: ${data.api_key_masked.slice(-4)}` : '';
+        document.getElementById('cfg-key').value = '';
+        setTimeout(closeSettings, 1200);
+      } else {
+        statusEl.textContent = `Error: ${JSON.stringify(data)}`;
+        statusEl.className = 'err';
+      }
+    } catch (err) {
+      statusEl.textContent = 'Network error: ' + err.message;
+      statusEl.className = 'err';
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  // Close settings modal with Escape key
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSettings();
+  });
+</script>
+</body>
+</html>

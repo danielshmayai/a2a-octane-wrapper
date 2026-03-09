@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  a2a-wrapper:
+    build: .
+    image: a2a-octane-wrapper:latest
+    env_file:
+      - env.example
+      - .env
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

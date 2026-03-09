@@ -1,0 +1,121 @@
+{
+  "name": "ALM Octane Agent",
+  "description": "Query and manage OpenText Octane ALM work items — defects, stories, features, comments, and personal work lists — using natural language. Powered by a Gemini function-calling agent. Invoke with @ALM Octane Agent in Google AgentSpace.",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "url": "https://your-deployed-host.example.com/message:send",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": {
+    "organization": "OpenText",
+    "url": "https://www.opentext.com"
+  },
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "securitySchemes": {
+    "bearer": {
+      "httpAuthSecurityScheme": {
+        "scheme": "Bearer"
+      }
+    }
+  },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["application/json", "text/plain"],
+  "skills": [
+    {
+      "id": "get_defect",
+      "name": "Get Defect",
+      "description": "Retrieve a defect raw data from Octane by its unique identifier.",
+      "tags": ["octane", "alm", "defect", "read"],
+      "examples": [
+        "Get defect 2110",
+        "Show me bug #9001",
+        "Fetch defect details for 42"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "get_story",
+      "name": "Get Story",
+      "description": "Retrieve a story raw data from Octane by its unique identifier.",
+      "tags": ["octane", "alm", "story", "read"],
+      "examples": [
+        "Get story 1234",
+        "Show me user story 55",
+        "Fetch story details for 88"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "get_feature",
+      "name": "Get Feature",
+      "description": "Retrieve raw data for a feature from Octane by its unique identifier.",
+      "tags": ["octane", "alm", "feature", "read"],
+      "examples": [
+        "Get feature 77",
+        "Show me feature 200",
+        "Fetch feature details for 15"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "get_comments",
+      "name": "Get Comments",
+      "description": "Retrieve all comments and discussion threads for a specific entity (defect, story, or feature). Use this when asked to summarize discussions, review feedback, or understand the conversation around an entity.",
+      "tags": ["octane", "alm", "comments", "discussion", "read"],
+      "examples": [
+        "Show comments on defect 2110",
+        "Get the discussion for story 55",
+        "List all comments on feature 77"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "create_comment",
+      "name": "Create Comment",
+      "description": "Creates a comment for the specified work item. The text parameter accepts HTML, allowing rich formatting such as bold, color, and font changes.",
+      "tags": ["octane", "alm", "comments", "write"],
+      "examples": [
+        "Add a comment to defect 2110 saying 'Reproduced on build 5.3'",
+        "Comment on story 55: needs clarification",
+        "Post a note on feature 77"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "update_comment",
+      "name": "Update Comment",
+      "description": "Updates an existing comment on a work item. The text parameter accepts HTML for rich formatting.",
+      "tags": ["octane", "alm", "comments", "write"],
+      "examples": [
+        "Update comment 99 on defect 2110 with new text",
+        "Edit comment 12 on story 55"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "fetch_My_Work_Items",
+      "name": "Fetch My Work Items",
+      "description": "Fetches the current user's assigned work items (stories, defects, quality stories) including metadata like ID, name, phase, priority, story points, sprint, owner, severity, and more. Results are ordered by user priority/rank.",
+      "tags": ["octane", "alm", "my work", "assigned", "backlog"],
+      "examples": [
+        "What are my work items?",
+        "Show my assigned defects and stories",
+        "Fetch my backlog"
+      ],
+      "inputModes": ["text/plain", "application/json"],
+      "outputModes": ["application/json"]
+    }
+  ]
+}
