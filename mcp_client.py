@@ -1,21 +1,23 @@
 """
-Stateless HTTP-POST MCP Client for the Octane MCP Server.
+Stateless HTTP-POST MCP Client for the Opentext SDP MCP Server.
 
-The Octane MCP server does NOT use SSE or STDIO transports.
+The Opentext SDP MCP server does NOT use SSE or STDIO transports.
 It exposes a single endpoint at  POST <base_url>/mcp  that accepts
 standard JSON-RPC 2.0 payloads and returns JSON-RPC 2.0 responses.
 
 Every request must carry:
-  - Authorization: Bearer <API_KEY>  header
-  - sharedSpaceId and workSpaceId inside params.arguments
+    - Authorization: Bearer <API_KEY>  header
+    - sharedSpaceId and workSpaceId inside params.arguments
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any
+import os
 
 import httpx
+from dotenv import load_dotenv
 
 import config
 
@@ -32,20 +34,40 @@ def _next_id() -> int:
 
 
 class OctaneMcpClient:
-    """Thin async wrapper around Octane's stateless HTTP MCP endpoint."""
+    """Thin async wrapper around Opentext SDP's stateless HTTP MCP endpoint."""
 
     def __init__(
         self,
         base_url: str = config.OCTANE_MCP_ENDPOINT,
-        api_key: str = config.API_KEY,
+        api_key: str | None = None,
         timeout: int = config.MCP_REQUEST_TIMEOUT_SECONDS,
     ):
+        # Resolve API key: prefer explicit non-empty param, then config value, then environment
+        resolved_key = api_key or config.API_KEY or os.getenv("API_KEY", "")
+
+        # If we still don't have a key, attempt to (re)load a local .env file
+        # so users can drop an .env after the process started and have it picked up.
+        if not resolved_key:
+            try:
+                load_dotenv()
+                resolved_key = os.getenv("API_KEY", "")
+                if resolved_key:
+                    logger.info("Loaded API_KEY from .env at runtime")
+            except Exception:
+                # Non-fatal: proceed without Authorization header
+                logger.debug("Could not load .env or no API_KEY present")
+
         self._url = base_url
         self._headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "Authorization": f"Bearer {api_key}",
         }
+        # Only set Authorization header when we have a non-empty API key
+        if resolved_key:
+            self._headers["Authorization"] = f"Bearer {resolved_key}"
+        else:
+            logger.debug("No API_KEY configured; MCP requests will be sent without Authorization header")
+
         self._timeout = timeout
 
     # ── Core transport ───────────────────────────────────────────────
@@ -58,7 +80,7 @@ class OctaneMcpClient:
                 self._url, json=payload, headers=self._headers
             )
             if resp.is_error:
-                # Log the full response body before raising so we can see why Octane rejected the request
+                # Log the full response body before raising so we can see why Opentext SDP rejected the request
                 try:
                     err_body = resp.json()
                 except Exception:
@@ -84,14 +106,14 @@ class OctaneMcpClient:
         workspace_id: int | None = None,
     ) -> dict:
         """
-        Invoke an MCP tool on the Octane server.
+        Invoke an MCP tool on the Opentext SDP server.
 
         Automatically injects the mandatory sharedSpaceId / workSpaceId
         context variables into the arguments dict.
 
         Returns the raw JSON-RPC result object, or raises on transport error.
         """
-        # Inject mandatory Octane context into every call
+        # Inject mandatory Opentext SDP context into every call
         arguments["sharedSpaceId"] = (
             shared_space_id or config.DEFAULT_SHARED_SPACE_ID
         )
@@ -113,7 +135,7 @@ class OctaneMcpClient:
         return self._parse_response(body)
 
     async def list_tools(self) -> dict:
-        """Ask the Octane MCP server which tools it exposes."""
+        """Ask the Opentext SDP MCP server which tools it exposes."""
         payload = {
             "jsonrpc": "2.0",
             "method": "tools/list",
@@ -128,9 +150,9 @@ class OctaneMcpClient:
     @staticmethod
     def _parse_response(body: dict) -> dict:
         """
-        Parse a JSON-RPC 2.0 response from Octane.
+        Parse a JSON-RPC 2.0 response from Opentext SDP.
 
-        Octane may return errors in two ways:
+        Opentext SDP may return errors in two ways:
           1. Standard JSON-RPC "error" key  → {"error": {"code": ..., "message": ...}}
           2. A successful result containing an isError flag inside content items.
 
@@ -161,7 +183,7 @@ class OctaneMcpClient:
 
 
 class OctaneMcpError(Exception):
-    """Raised when the Octane MCP server returns an error."""
+    """Raised when the Opentext SDP MCP server returns an error."""
 
     def __init__(self, code: int, message: str, data: Any = None):
         self.code = code

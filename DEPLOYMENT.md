@@ -42,8 +42,8 @@ cp env.example .env           # macOS / Linux
 ```
 
 Open `.env` in your editor and set at minimum:
-- `OCTANE_BASE_URL` — the Octane MCP server base URL (e.g. `http://localhost:8080`)
-- `API_KEY` — Octane bearer token
+- `OCTANE_BASE_URL` — the Opentext SDP MCP server base URL (e.g. `http://localhost:8080`)
+- `API_KEY` — Opentext SDP bearer token
 - `DEFAULT_SHARED_SPACE_ID` and `DEFAULT_WORKSPACE_ID`
 
 Optional (to enable Gemini agent):
@@ -72,7 +72,7 @@ curl http://localhost:9000/.well-known/agent-card.json
 
 Open http://localhost:9000 and ask e.g. `Get defect 2110`.
 
-8. If you need to change the Octane server or API key at runtime (without restarting), use the runtime config endpoint from the UI `⚙` or call it directly:
+8. If you need to change the Opentext SDP server or API key at runtime (without restarting), use the runtime config endpoint from the UI `⚙` or call it directly:
 
 ```bash
 curl -X POST http://localhost:9000/config \
@@ -83,7 +83,7 @@ curl -X POST http://localhost:9000/config \
 9. Inspect logs and troubleshooting tips:
 
 - Watch the terminal where `uvicorn` runs for startup messages and discovery logs.
-- If the wrapper cannot contact Octane, you will see `Could not auto-discover MCP tools` warnings — check `OCTANE_BASE_URL` and network reachability.
+- If the wrapper cannot contact Opentext SDP, you will see `Could not auto-discover MCP tools` warnings — check `OCTANE_BASE_URL` and network reachability.
 - If the Gemini agent fails to initialise, the app will fall back to the keyword router; check that `GEMINI_API_KEY` is set and valid if you expect LLM behaviour.
 
 That’s it — you should now be able to develop and iterate locally. When you are ready to containerise or deploy, follow the Docker or systemd sections below.
@@ -118,7 +118,7 @@ Example `systemd` unit for production (place in `/etc/systemd/system/a2a-wrapper
 
 ```ini
 [Unit]
-Description=A2A Octane Wrapper
+Description=A2A Opentext SDP Wrapper
 After=network.target
 
 [Service]
@@ -161,7 +161,7 @@ sudo journalctl -u a2a-wrapper -f
 ## Health checks and monitoring
 
 - Use `/health` for liveness probes. Example Kubernetes readiness/liveness probe: `httpGet: path: /health port: 9000`.
-- Monitor logs for `Periodic discovery` messages and MCP errors to ensure connectivity to Octane.
+- Monitor logs for `Periodic discovery` messages and MCP errors to ensure connectivity to Opentext SDP.
 
 
 If you'd like, I can also add a sample `docker-compose.yml` and a `systemd` unit file to the repo — tell me which one you prefer and I'll add it.

@@ -1,12 +1,12 @@
-# A2A Octane MCP Agent Wrapper
+# A2A Opentext SDP MCP Agent Wrapper
 
-A lightweight Python service that bridges the **Google Agent-to-Agent (A2A) protocol** with the **OpenText Octane MCP Server**, powered by a **Gemini function-calling agent** that understands natural language, drives multi-step Octane tool calls, and maintains **per-session conversation memory**.
+A lightweight Python service that bridges the **Google Agent-to-Agent (A2A) protocol** with the **Opentext SDP MCP Server**, powered by a **Gemini function-calling agent** that understands natural language, drives multi-step Opentext SDP tool calls, and maintains **per-session conversation memory**.
 
 ---
 
 ## Ways to Use This Agent
 
-Once the wrapper is running (`python main.py`), you can interact with the Octane agent in four different ways — no enterprise account required for options 1–3:
+Once the wrapper is running (`python main.py`), you can interact with the Opentext SDP agent in four different ways — no enterprise account required for options 1–3:
 
 | # | Option | Access | Best for |
 |---|---|---|---|
@@ -112,7 +112,7 @@ Google Gemini Enterprise / A2A Client
 
         # Linux / macOS
 ┌─────────────────────────────────┐
-│   A2A Octane Wrapper  :9000     │
+│   A2A Opentext SDP Wrapper  :9000     │
 │   + Gemini Agent                │
 │   + per-session chat history    │
 └─────────────────────────────────┘
@@ -120,22 +120,22 @@ Google Gemini Enterprise / A2A Client
         │  JSON-RPC 2.0  (MCP protocol)
         ▼
 ┌──────────────────────┐
-│  Octane MCP Server   │
+│  Opentext SDP MCP Server   │
 │  /mcp endpoint       │
 └──────────────────────┘
         │
         ▼
 ┌──────────────────────┐
-│  OpenText Octane ALM │
+│  Opentext SDP │
 └──────────────────────┘
 ```
 
 When `GEMINI_API_KEY` is set, the wrapper uses a **Gemini function-calling agent** that:
 
 1. Understands the user's free-text request via an LLM
-2. Decides which Octane tool(s) to call
-3. Executes them against the Octane MCP server
-4. Returns a natural-language summary with raw Octane data as collapsible artifacts
+2. Decides which Opentext SDP tool(s) to call
+3. Executes them against the Opentext SDP MCP server
+4. Returns a natural-language summary with raw Opentext SDP data as collapsible artifacts
 5. **Retains full conversation history per session** — follow-up questions like "who owns it?" or "show me the next one" work seamlessly
 
 Without a Gemini API key it falls back to a lightweight **keyword-based router**.
@@ -182,7 +182,7 @@ Without a Gemini API key it falls back to a lightweight **keyword-based router**
 | `main.py` | FastAPI bootstrap, A2A endpoints, routes to Gemini agent or keyword fallback |
 | `gemini_agent.py` | Gemini function-calling agentic loop, per-session history, auto-text generation |
 | `a2a_models.py` | Pydantic models: `Message`, `Task`, `Artifact`, `AgentCard`, `AgentSkill` |
-| `mcp_client.py` | JSON-RPC 2.0 async client for the Octane MCP `/mcp` endpoint |
+| `mcp_client.py` | JSON-RPC 2.0 async client for the Opentext SDP MCP `/mcp` endpoint |
 | `tool_router.py` | `TOOL_REGISTRY`, `resolve_intent()`, `extract_arguments()`, `execute_tool()` |
 | `config.py` | Single source of truth for all env-var configuration |
 
@@ -194,8 +194,8 @@ Without a Gemini API key it falls back to a lightweight **keyword-based router**
 | Requirement | Notes |
 |---|---|
 | Python 3.11+ | Required by `google-genai` SDK |
-| OpenText Octane MCP Server | Must be running and network-reachable |
-| Octane API key | Bearer token for authenticating MCP requests |
+| Opentext SDP MCP Server | Must be running and network-reachable |
+| Opentext SDP API key | Bearer token for authenticating MCP requests |
 | Google Gemini API key | **Optional** — activates the full agentic experience. Without it the wrapper uses keyword routing. |
 | Public HTTPS URL | **Required only for Google Agentspace integration** — ngrok works for development |
 
@@ -284,7 +284,7 @@ MCP_REQUEST_TIMEOUT_SECONDS=30
 | `A2A_PORT` | `9000` | — | Port to listen on |
 | `MCP_REQUEST_TIMEOUT_SECONDS` | `30` | — | Timeout (seconds) for upstream Octane calls |
 
-> **Where to find the Octane IDs:** In your Octane browser URL the path contains `/ui/entity-navigation?p=<sharedSpaceId>/<workspaceId>`. Use those numbers.
+> **Where to find the Opentext SDP IDs:** In your Opentext SDP browser URL the path contains `/ui/entity-navigation?p=<sharedSpaceId>/<workspaceId>`. Use those numbers.
 
 ---
 
@@ -419,7 +419,7 @@ Features:
 
 ### What you will achieve
 
-After registration, the Octane ALM Agent appears in the `@` popover alongside built-in Google agents:
+After registration, the Opentext SDP Agent appears in the `@` popover alongside built-in Google agents:
 
 ```
 ┌────────────────────────────────────────────────┐
@@ -432,8 +432,8 @@ After registration, the Octane ALM Agent appears in the `@` popover alongside bu
 │  │   AI-powered document analysis an…        │  │
 │  │ ● Deep Research                           │  │
 │  │   Get in-depth answers grounded in…       │  │
-│  │ ● Octane ALM Agent          ◄── yours     │  │  ← appears after registration
-│  │   Query and manage Octane ALM work…       │  │
+│  │ ● Opentext SDP Agent          ◄── yours     │  │  ← appears after registration
+│  │   Query and manage Opentext SDP work…       │  │
 │  └───────────────────────────────────────────┘  │
 │                                                 │
 │  [ @_________________________________________ ] │
@@ -529,8 +529,8 @@ Paste the full JSON output into the **Agent card JSON** field. Example of what s
 
 ```json
 {
-  "name": "Octane ALM Agent",
-  "description": "Query and manage OpenText Octane ALM work items — defects, stories, features, comments, and personal work lists — using natural language.",
+  "name": "Opentext SDP Agent",
+  "description": "Query and manage Opentext SDP work items — defects, stories, features, comments, and personal work lists — using natural language.",
   "version": "1.0.0",
   "url": "https://abc123.ngrok-free.app/message:send",
   "capabilities": {},
@@ -556,7 +556,7 @@ Click **Preview agent details** to validate, then click **Next**.
 
 You will be asked to configure authentication. This step is **optional** — it is only required if the agent needs to access **Google Cloud resources** (e.g. BigQuery) on behalf of users.
 
-**For the Octane ALM Agent, which connects to Octane (not Google Cloud):**
+**For the Opentext SDP Agent, which connects to Opentext SDP (not Google Cloud):**
 
 → Click **Skip & Finish**.
 
@@ -577,18 +577,18 @@ The Client ID, Client Secret, Authorization URI, and Token URI must come from a 
 
 After clicking **Finish** (or **Skip & Finish**):
 
-- The **Octane ALM Agent** now appears in the Gemini Enterprise web app's `@` popover.
-- Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **Octane ALM Agent**.
+- The **Opentext SDP Agent** now appears in the Gemini Enterprise web app's `@` popover.
+- Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **Opentext SDP Agent**.
 
 ```
-@Octane ALM Agent Get defect 2110
-@Octane ALM Agent What are my work items?
-@Octane ALM Agent Show comments on story 55
-@Octane ALM Agent Add a comment to defect 2110 saying "Under investigation"
-@Octane ALM Agent Get feature 200 and summarize it
+@Opentext SDP Agent Get defect 2110
+@Opentext SDP Agent What are my work items?
+@Opentext SDP Agent Show comments on story 55
+@Opentext SDP Agent Add a comment to defect 2110 saying "Under investigation"
+@Opentext SDP Agent Get feature 200 and summarize it
 ```
 
-Gemini Enterprise forwards the message to your wrapper's `/message:send` endpoint via the A2A protocol. The Gemini agent fetches the data from Octane and returns a natural-language reply inline in the chat.
+Gemini Enterprise forwards the message to your wrapper's `/message:send` endpoint via the A2A protocol. The Gemini agent fetches the data from Opentext SDP and returns a natural-language reply inline in the chat.
 
 > **Multi-turn context:** Gemini Enterprise passes the conversation thread ID as `contextId`, so follow-up questions within the same thread retain full history — exactly like the built-in chat UI.
 

@@ -1,13 +1,13 @@
 """
-Tool Router – translates inbound A2A intents into Octane MCP tool calls.
+Tool Router – translates inbound A2A intents into Opentext SDP MCP tool calls.
 
 The router does two things:
   1. **Intent extraction** – parses the A2A Message to figure out which
-     Octane tool to call and with what arguments.
+      Opentext SDP tool to call and with what arguments.
   2. **Result formatting** – converts the raw MCP tool result into an
-     A2A Artifact that Gemini can consume.
+      A2A Artifact that Gemini can consume.
 
-Supported tools (matching the Octane MCP server's McpToolDescriptor beans):
+Supported tools (matching the Opentext SDP MCP server's McpToolDescriptor beans):
   - get_defect          : Retrieve a single defect by entityId
   - get_story           : Retrieve a single story by entityId
   - get_feature         : Retrieve a single feature by entityId
@@ -28,11 +28,11 @@ from mcp_client import OctaneMcpClient
 
 logger = logging.getLogger(__name__)
 
-# ── Supported tool definitions (used by the router and the AgentCard) ──
+# ── Supported tool definitions (used by the router and the AgentCard) ── Fallback behavior: When the Opentext SDP MCP server is unreachable
 
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "get_defect": {
-        "description": "Retrieve a defect raw data from Octane by its unique identifier.",
+        "description": "Retrieve a defect raw data from Opentext SDP by its unique identifier.",
         "example_prompts": [
             "Get defect 2110",
             "Show me bug #9001",
@@ -42,7 +42,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
         "required": ["entityId"],
     },
     "get_story": {
-        "description": "Retrieve a story raw data from Octane by its unique identifier.",
+        "description": "Retrieve a story raw data from Opentext SDP by its unique identifier.",
         "example_prompts": [
             "Get story 1234",
             "Show me user story 55",
@@ -51,7 +51,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
         "required": ["entityId"],
     },
     "get_feature": {
-        "description": "Retrieve raw data for a feature from Octane by its unique identifier.",
+        "description": "Retrieve raw data for a feature from Opentext SDP by its unique identifier.",
         "example_prompts": [
             "Get feature 77",
             "Show me feature 200",
@@ -226,7 +226,7 @@ def _extract_entity_id(text: str) -> int | None:
 
 
 def _extract_entity_type(text: str) -> str | None:
-    """Derive the Octane entityType string from keywords in free text."""
+    """Derive the Opentext SDP entityType string from keywords in free text."""
     tl = text.lower()
     if "user story" in tl or "story" in tl:
         return "story"
@@ -303,7 +303,7 @@ async def execute_tool(
     mcp: OctaneMcpClient,
 ) -> Artifact:
     """
-    Call the Octane MCP server and wrap the result in an A2A Artifact.
+    Call the Opentext SDP MCP server and wrap the result in an A2A Artifact.
     """
     logger.info("Routing tool=%s  args=%s", tool_name, arguments)
 
@@ -331,6 +331,6 @@ async def execute_tool(
 
     return Artifact(
         name=f"{tool_name}_result",
-        description=f"Result from Octane tool: {tool_name}",
+        description=f"Result from Opentext SDP tool: {tool_name}",
         parts=parts,
     )

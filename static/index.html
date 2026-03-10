@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ALM Octane Agent</title>
+  <title>Opentext SDP Agent</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -417,20 +418,20 @@
     <img src="/static/OTEX_BIG.svg" alt="OpenText" />
   </div>
   <div class="divider"></div>
-  <h1>Octane ALM Agent</h1>
+  <h1>Opentext SDP Agent</h1>
   <span>A2A Wrapper</span>
   <div id="gemini-indicator" title="Gemini status" onclick="openSettings()" style="cursor:pointer;margin-left:12px">● Gemini: <span id="gemini-status-text">?</span></div>
-  <button id="settings-btn" title="Octane connection settings" onclick="openSettings()">⚙</button>
+  <button id="settings-btn" title="Opentext SDP connection settings" onclick="openSettings()">⚙</button>
 </header>
 
 <!-- Settings Modal -->
 <div id="settings-overlay" onclick="overlayClick(event)">
   <div id="settings-modal">
-    <h2>⚙ Octane Connection</h2>
+    <h2>⚙ Opentext SDP Connection</h2>
     <div class="setting-group">
-      <label>OCTANE SERVER URL</label>
+      <label>Opentext SDP SERVER URL</label>
       <input id="cfg-url" type="text" placeholder="http://localhost:8080" />
-      <span class="settings-hint">Base URL of the Octane MCP server (without /mcp)</span>
+      <span class="settings-hint">Base URL of the Opentext SDP MCP server (without /mcp)</span>
     </div>
     <div class="setting-group">
       <label>API TOKEN</label>
@@ -468,8 +469,8 @@
 <div id="chat-window">
   <div id="empty-state">
     <div class="icon">🤖</div>
-    <h2>Octane ALM Agent</h2>
-    <p>Ask me about defects, stories, features, comments, or your work items in Octane. Powered by Gemini AI.</p>
+    <h2>Opentext SDP Agent</h2>
+    <p>Ask me about defects, stories, features, comments, or your work items in Opentext SDP. Powered by Gemini AI.</p>
     <div class="suggestion-chips">
       <div class="chip" onclick="sendChip(this)">Get defect 2110</div>
       <div class="chip" onclick="sendChip(this)">Show my work items</div>
@@ -481,7 +482,7 @@
     <div class="agentspace-note">
       <strong>Also available in Google AgentSpace:</strong> Register this agent at
       <code style="font-size:10px;color:#9ca3af">vertexaisearch.cloud.google.com</code>
-      and invoke it with <code style="font-size:10px;color:#9ca3af">@Octane ALM Agent</code> from any AgentSpace conversation.
+      and invoke it with <code style="font-size:10px;color:#9ca3af">@Opentext SDP Agent</code> from any AgentSpace conversation.
       See <a id="readme-link" href="/readme" target="_blank" rel="noopener noreferrer" style="color:#6366f1;text-decoration:none">README.md</a> for setup steps (rendered markdown view).
     </div>
   </div>
@@ -786,7 +787,7 @@
     const ws  = document.getElementById('cfg-ws').value.trim();
 
     if (!url) {
-      statusEl.textContent = 'Octane Server URL is required.';
+      statusEl.textContent = 'Opentext SDP Server URL is required.';
       statusEl.className = 'err';
       return;
     }

@@ -1,7 +1,7 @@
 """
 Configuration module.
 
-Loads Octane MCP server connection details and A2A wrapper settings
+Loads Opentext SDP MCP server connection details and A2A wrapper settings
 from environment variables (with .env file support).
 """
 
@@ -10,12 +10,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Octane MCP Server Connection ---
-OCTANE_BASE_URL: str = os.getenv("OCTANE_BASE_URL", "http://localhost:8080")
+# --- Opentext SDP MCP Server Connection ---
+OCTANE_BASE_URL: str = os.getenv("OCTANE_BASE_URL", "http://localhost:8080").rstrip("/")
 OCTANE_MCP_ENDPOINT: str = f"{OCTANE_BASE_URL}/mcp"
 API_KEY: str = os.getenv("API_KEY", "")
 
-# --- Octane Context (injected into every MCP tool call) ---
+# --- Opentext SDP Context (injected into every MCP tool call) ---
 DEFAULT_SHARED_SPACE_ID: int = int(os.getenv("DEFAULT_SHARED_SPACE_ID", "1001"))
 DEFAULT_WORKSPACE_ID: int = int(os.getenv("DEFAULT_WORKSPACE_ID", "1002"))
 

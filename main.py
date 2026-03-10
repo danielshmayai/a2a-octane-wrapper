@@ -1,13 +1,13 @@
 """
-A2A ↔ Octane MCP Agent Wrapper
+A2A ↔ Opentext SDP MCP Agent Wrapper
 ===============================
 
 A lightweight FastAPI application that bridges the Google A2A protocol
-(HTTP+JSON binding) with the internal Octane MCP Server.
+(HTTP+JSON binding) with the internal Opentext SDP MCP Server.
 
 Architecture:
 
-    Gemini Enterprise ──A2A──▶  this wrapper  ──JSON-RPC POST──▶  Octane /mcp
+    Gemini Enterprise ──A2A──▶  this wrapper  ──JSON-RPC POST──▶  Opentext SDP /mcp
 
 Endpoints:
     GET  /.well-known/agent-card.json   → AgentCard discovery
@@ -68,9 +68,9 @@ logger = logging.getLogger("a2a-wrapper")
 # ── App & shared MCP client ─────────────────────────────────────────
 
 app = FastAPI(
-    title="Octane A2A Agent Wrapper",
+    title="Opentext SDP A2A Agent Wrapper",
     version=config.AGENT_VERSION,
-    description="Bridges Google A2A protocol to the Octane MCP Server.",
+    description="Bridges Google A2A protocol to the Opentext SDP MCP Server.",
 )
 
 mcp = OctaneMcpClient()
@@ -85,10 +85,10 @@ async def _startup() -> None:
         raw = await mcp.list_tools()
         mcp_tools = raw.get("tools", [])
         populate_registry_from_mcp(mcp_tools)
-        logger.info("Discovered %d tools from Octane MCP server", len(mcp_tools))
+        logger.info("Discovered %d tools from Opentext SDP MCP server", len(mcp_tools))
     except Exception as exc:
         logger.warning(
-            "Could not auto-discover MCP tools (Octane unreachable?); "
+            "Could not auto-discover MCP tools (Opentext SDP unreachable?); "
             "using built-in registry. Error: %s", exc
         )
     # ── Initialise Gemini agent ───────────────────────────────────────
@@ -172,7 +172,7 @@ async def get_config():
 
 @app.post("/config")
 async def update_config(body: ConfigUpdate):
-    """Update Octane URL and/or API key at runtime and reinitialise the MCP client."""
+    """Update Opentext SDP URL and/or API key at runtime and reinitialise the MCP client."""
     global mcp, agent
     changed = []
     if body.octane_url is not None:
@@ -243,17 +243,17 @@ def _build_agent_card(base_url: str) -> AgentCard:
             id=tool_name,
             name=tool_name.replace("_", " ").title(),
             description=tool_def["description"],
-            tags=["octane", "alm", tool_name],
+            tags=["opentext-sdp", tool_name],
             examples=tool_def.get("example_prompts", []),
         )
         for tool_name, tool_def in TOOL_REGISTRY.items()
     ]
 
     return AgentCard(
-        name="ALM Octane Agent",
+        name="Opentext SDP Agent",
         description=(
-            "An agent that provides read access to OpenText Octane ALM data "
-            "(defects, user stories, features) via the Octane MCP Server."
+            "An agent that provides read access to Opentext SDP data "
+            "(defects, user stories, features) via the Opentext SDP MCP Server."
         ),
         version=config.AGENT_VERSION,
         supportedInterfaces=[
@@ -283,7 +283,7 @@ def _build_agent_card(base_url: str) -> AgentCard:
 async def discover_tools():
     """Manual trigger to discover MCP tools and refresh the router/agent.
 
-    Useful when you add a tool to Octane and want the wrapper to pick it up
+    Useful when you add a tool to Opentext SDP and want the wrapper to pick it up
     immediately without restarting.
     """
     global mcp, agent
@@ -454,26 +454,26 @@ async def _handle_with_keywords(
     try:
         artifact = await execute_tool(tool_name, arguments, mcp)
     except OctaneMcpError as exc:
-        logger.error("Octane MCP error: %s", exc)
+        logger.error("Opentext SDP MCP error: %s", exc)
         return _error_task(
             task_id, context_id, TaskState.FAILED,
-            f"Octane returned an error: {exc.message} (code {exc.code})",
+            f"Opentext SDP returned an error: {exc.message} (code {exc.code})",
         )
     except httpx.TimeoutException:
-        logger.error("Timeout calling Octane MCP server")
+        logger.error("Timeout calling Opentext SDP MCP server")
         return _error_task(
             task_id, context_id, TaskState.FAILED,
-            "Request to Octane MCP server timed out.",
+            "Request to Opentext SDP MCP server timed out.",
         )
     except httpx.HTTPStatusError as exc:
         try:
             detail = exc.response.json()
         except Exception:
             detail = exc.response.text
-        logger.error("HTTP error from Octane: %s  body=%s", exc, detail)
+        logger.error("HTTP error from Opentext SDP: %s  body=%s", exc, detail)
         return _error_task(
             task_id, context_id, TaskState.FAILED,
-            f"Octane HTTP error: {exc.response.status_code} – {detail}",
+            f"Opentext SDP HTTP error: {exc.response.status_code} – {detail}",
         )
     except Exception as exc:
         logger.exception("Unexpected error during MCP call")
@@ -508,8 +508,8 @@ async def health():
 @app.get("/tools")
 async def list_tools():
     """
-    Proxy to Octane's tools/list – lets you verify the exact tool names
-    the Octane MCP server exposes so they can be matched in TOOL_REGISTRY.
+    Proxy to Opentext SDP's tools/list – lets you verify the exact tool names
+    the Opentext SDP MCP server exposes so they can be matched in TOOL_REGISTRY.
     """
     try:
         result = await mcp.list_tools()

@@ -1,4 +1,4 @@
-﻿# A2A  Octane MCP Wrapper  Design Document
+﻿# A2A Opentext SDP MCP Wrapper Design Document
 
 ---
 
@@ -14,17 +14,17 @@
 
 ### Purpose
 
-This service allows AI agents and chat interfaces that speak the **Google A2A protocol** to query and manage **OpenText Octane ALM** data through natural language, powered by a Gemini LLM agent. It translates between the A2A protocol, the Gemini function-calling layer, and the Octane MCP transport.
+This service allows AI agents and chat interfaces that speak the **Google A2A protocol** to query and manage **Opentext SDP** data through natural language, powered by a Gemini LLM agent. It translates between the A2A protocol, the Gemini function-calling layer, and the Opentext SDP MCP transport.
 
 ### Actors
 
 | Actor | Role |
 |---|---|
 | **A2A Client** | Any A2A-compatible agent or UI (Google AgentSpace, the built-in chat UI) that sends natural-language messages |
-| **A2A Wrapper** | This service  receives A2A messages, runs them through the Gemini agent, executes Octane tool calls, and returns A2A Task responses |
-| **Gemini Agent** | LLM function-calling agent inside the wrapper that decides which Octane tools to call and synthesizes the final answer |
-| **Octane MCP Server** | Backend ALM system exposing domain tools over the Model Context Protocol |
-| **OpenText Octane** | The underlying ALM data store (defects, stories, features, comments, etc.) |
+| **A2A Wrapper** | This service  receives A2A messages, runs them through the Gemini agent, executes Opentext SDP tool calls, and returns A2A Task responses |
+| **Gemini Agent** | LLM function-calling agent inside the wrapper that decides which Opentext SDP tools to call and synthesizes the final answer |
+| **Opentext SDP MCP Server** | Backend ALM system exposing domain tools over the Model Context Protocol |
+| **Opentext SDP** | The underlying ALM data store (defects, stories, features, comments, etc.) |
 
 ### Functional Flows
 
@@ -40,7 +40,7 @@ Gemini selects tool: get_defect(entityId=2110)
    MCP call: tools/call  name=get_defect  arguments={entityId:2110, sharedSpaceId:..., workSpaceId:...}
   
   
-Octane returns defect JSON
+Opentext SDP returns defect JSON
   
   
 Gemini synthesizes natural-language summary
@@ -60,7 +60,7 @@ Gemini selects tool: fetch_My_Work_Items()
    MCP call: tools/call  name=fetch_My_Work_Items
   
   
-Octane returns list of assigned items
+Opentext SDP returns list of assigned items
   
   
 Gemini summarizes: lists each item type, ID, name, phase
@@ -114,14 +114,14 @@ Regex extracts entityId = 2110
    MCP call: tools/call  name=get_defect
   
   
-Raw Octane result wrapped in A2A Artifact
+Raw Opentext SDP result wrapped in A2A Artifact
 A2A Task (COMPLETED)  status.message = "Successfully executed get_defect"
 ```
 
 #### Flow 6  Error handling
 
 ```
-Gemini calls tool  Octane returns HTTP 400 or JSON-RPC error
+Gemini calls tool  Opentext SDP returns HTTP 400 or JSON-RPC error
   
   
 Error string fed back to Gemini as FunctionResponse
@@ -161,7 +161,7 @@ A2A Task (COMPLETED or FAILED depending on severity)
 
 ### What is AgentSpace?
 
-**Google AgentSpace** (`vertexaisearch.cloud.google.com`) is Google's enterprise AI assistant platform. It supports **external A2A agents** that users can invoke with `@AgentName` directly from the chat interface. When a user types `@` in the chat input, a popover appears listing all available agents — built-in ones (like "Deep Research") and any registered external agents (like the Octane ALM Agent).
+**Google AgentSpace** (`vertexaisearch.cloud.google.com`) is Google's enterprise AI assistant platform. It supports **external A2A agents** that users can invoke with `@AgentName` directly from the chat interface. When a user types `@` in the chat input, a popover appears listing all available agents — built-in ones (like "Deep Research") and any registered external agents (like the Opentext SDP Agent).
 
 The screenshot below shows what this looks like in practice:
 
@@ -186,7 +186,7 @@ The screenshot below shows what this looks like in practice:
 └─────────────────────────────────────────────────┘
 ```
 
-After registering the Octane ALM Agent, it appears in this list and users can type `@Octane ALM Agent Get defect 2110` to query Octane directly from AgentSpace.
+After registering the Opentext SDP Agent, it appears in this list and users can type `@Opentext SDP Agent Get defect 2110` to query Opentext SDP directly from AgentSpace.
 
 ### A2A Protocol Primer
 
@@ -200,12 +200,12 @@ The A2A protocol defines:
 ### Registration Flow
 
 ```
-AgentSpace (cloud)                A2A Octane Wrapper (your server)
+AgentSpace (cloud)                A2A Opentext SDP Wrapper (your server)
        │                                       │
        │── GET /.well-known/agent-card.json ──►│
        │◄── AgentCard JSON ────────────────────│
        │                                       │
-       │  (user types @Octane ALM Agent ...)   │
+      │  (user types @Opentext SDP Agent ...)   │
        │                                       │
        │── POST /message:send ────────────────►│
        │   { message: {                        │
@@ -229,8 +229,8 @@ AgentSpace is a cloud service — your wrapper **must be reachable via public HT
 | Local development | `ngrok http 9000` — creates a public HTTPS tunnel |
 | Staging / production | Cloud Run, App Engine, EC2/VM behind nginx with TLS |
 | Enterprise on-prem | API Gateway or DMZ reverse proxy with a valid certificate |
-
-### Step-by-Step: Register the Octane Agent in AgentSpace
+| HTTP 4xx/5xx from Opentext SDP | HTTPX | Error string fed back to Gemini | `Task(FAILED)` + body |
+### Step-by-Step: Register the Opentext SDP Agent in AgentSpace
 
 **Step 1 — Make the wrapper publicly reachable**
 
@@ -261,7 +261,7 @@ curl https://<your-public-url>/health
 
 1. Open AgentSpace at `https://vertexaisearch.cloud.google.com`
 2. In the chat input box, **type `@`** — the Agents popover appears (as in the screenshot above)
-3. If "Octane ALM Agent" is not yet in the list, look for **"Connect an agent"** or **"Add external agent"** in the popover or the left sidebar Agents panel
+3. If "Opentext SDP Agent" is not yet in the list, look for **"Connect an agent"** or **"Add external agent"** in the popover or the left sidebar Agents panel
 
 **Step 4 — Enter the agent URL**
 
@@ -270,7 +270,7 @@ curl https://<your-public-url>/health
    https://<your-public-url>
    ```
 2. AgentSpace automatically fetches `/.well-known/agent-card.json` and displays:
-   - Agent name: **Octane ALM Agent**
+   - Agent name: **Opentext SDP Agent**
    - Description from the AgentCard
    - List of skills: Get Defect, Get Story, Get Feature, Get Comments, Create Comment, Update Comment, Fetch My Work Items
 
@@ -278,19 +278,19 @@ curl https://<your-public-url>/health
 
 Click **Save** — the agent now appears in the `@` mention popover alongside other agents.
 
-**Step 6 — Invoke the Octane agent from AgentSpace chat**
+**Step 6 — Invoke the Opentext SDP agent from AgentSpace chat**
 
-Type `@` in the chat input, select **Octane ALM Agent**, and continue with your request:
+Type `@` in the chat input, select **Opentext SDP Agent**, and continue with your request:
 
 ```
-@Octane ALM Agent Get defect 2110
-@Octane ALM Agent What are my work items?
-@Octane ALM Agent Add a comment to defect 2110 saying "Fixed in 5.3"
-@Octane ALM Agent Show comments on story 55
-@Octane ALM Agent Get feature 200 and summarize it
+@Opentext SDP Agent Get defect 2110
+@Opentext SDP Agent What are my work items?
+@Opentext SDP Agent Add a comment to defect 2110 saying "Fixed in 5.3"
+@Opentext SDP Agent Show comments on story 55
+@Opentext SDP Agent Get feature 200 and summarize it
 ```
 
-AgentSpace forwards the message to `/message:send` using the A2A protocol. The Gemini agent fetches data from Octane and returns a natural-language reply displayed inline in AgentSpace.
+AgentSpace forwards the message to `/message:send` using the A2A protocol. The Gemini agent fetches data from Opentext SDP and returns a natural-language reply displayed inline in AgentSpace.
 
 **Multi-turn context in AgentSpace:** AgentSpace passes the conversation thread ID as `contextId`, so follow-up questions within the same conversation retain full context — just as they do in the built-in chat UI.
 
@@ -343,8 +343,8 @@ AgentSpace forwards the message to `/message:send` using the A2A protocol. The G
                                                                 
                         
                                            JSON-RPC 2.0  POST /mcp
-                                         
-                                 Octane MCP Server
+                                          
+                                 Opentext SDP MCP Server
 ```
 
 ### Module Responsibilities
@@ -353,7 +353,7 @@ AgentSpace forwards the message to `/message:send` using the A2A protocol. The G
 - Bootstraps the FastAPI application, mounts static files
 - On startup, initializes `GeminiAgent` if `GEMINI_API_KEY` is set
 - Routes `/message:send` to `_handle_with_agent()` or `_handle_with_keywords()`
-- `_handle_with_agent()`  calls `agent.run(user_text, mcp, context_id)`, wraps the summary as the A2A Task status message, attaches Octane Artifacts
+- `_handle_with_agent()`  calls `agent.run(user_text, mcp, context_id)`, wraps the summary as the A2A Task status message, attaches Opentext SDP Artifacts
 - `_handle_with_keywords()`  legacy path: keyword intent  argument extraction  MCP call  Task response
 
 #### `gemini_agent.py`
@@ -361,9 +361,9 @@ Gemini function-calling agentic loop with per-session conversation memory and au
 
 | Component | Purpose |
 |---|---|
-| `_SYSTEM_PROMPT` | Instructs Gemini to summarize Octane data naturally, use tools first, and freely draft comment text |
+| `_SYSTEM_PROMPT` | Instructs Gemini to summarize Opentext SDP data naturally, use tools first, and freely draft comment text |
 | `_GENERATE_TEXT_TRIGGERS` | Regex that detects "invent / funny / make up / anything" patterns |
-| `_TOOL_DECLARATIONS` | 7 `types.FunctionDeclaration` objects  one per Octane MCP tool |
+| `_TOOL_DECLARATIONS` | 7 `types.FunctionDeclaration` objects  one per Opentext SDP MCP tool |
 | `GeminiAgent.__init__` | Configures `genai.Client`, `GenerateContentConfig`, and `_histories` dict |
 | `GeminiAgent.run(user_text, mcp, context_id)` | Pre-generates text if needed, loads history, drives agentic loop, saves updated history |
 | `_maybe_inject_generated_text()` | Detects open-ended text requests, calls Gemini with a neutral prompt to produce concrete comment text, splices it back into the user message |
@@ -387,11 +387,11 @@ Pydantic models implementing the A2A HTTP+JSON binding:
 | `TaskState` | Enum: COMPLETED, FAILED, REJECTED, etc. |
 
 #### `mcp_client.py`
-- Async HTTP client for Octane MCP endpoint (JSON-RPC 2.0 POST `/mcp`)
+- Async HTTP client for Opentext SDP MCP endpoint (JSON-RPC 2.0 POST `/mcp`)
 - Injects `sharedSpaceId`, `workSpaceId` from config into every call
 - Required headers: `Content-Type: application/json`, `Accept: application/json, text/event-stream`, `Authorization: Bearer <API_KEY>`
 - On HTTP error, logs the full response body before raising
-- Parses both standard JSON-RPC errors and Octane's inline `isError` content errors
+- Parses both standard JSON-RPC errors and Opentext SDP's inline `isError` content errors
 
 #### `tool_router.py`
 - `TOOL_REGISTRY`  7 tool definitions with default arguments and required field lists
@@ -464,15 +464,15 @@ Task(COMPLETED)
 | Gemini API failure | Gemini | `Task(FAILED)` with error detail | N/A |
 | Unknown intent | Wrapper | N/A (Gemini decides) | `Task(REJECTED)` |
 | Argument parse failure | Wrapper | N/A (Gemini provides args) | `Task(FAILED)` |
-| HTTP 4xx/5xx from Octane | HTTPX | Error string fed back to Gemini | `Task(FAILED)` + body |
+| HTTP 4xx/5xx from Opentext SDP | HTTPX | Error string fed back to Gemini | `Task(FAILED)` + body |
 | Timeout | HTTPX | Error string fed back to Gemini | `Task(FAILED)` |
-| JSON-RPC error | Octane | Error string fed back to Gemini | `Task(FAILED)` |
-| Octane inline `isError` | Octane | Error string fed back to Gemini | `Task(FAILED)` |
+| JSON-RPC error | Opentext SDP | Error string fed back to Gemini | `Task(FAILED)` |
+| Opentext SDP inline `isError` | Opentext SDP | Error string fed back to Gemini | `Task(FAILED)` |
 | Max tool rounds exceeded | Wrapper | Final text from last response | N/A |
 
 ### Security
 
-- Octane authentication: **Bearer token** (`Authorization: Bearer <API_KEY>`)
+- Opentext SDP authentication: **Bearer token** (`Authorization: Bearer <API_KEY>`)
 - Gemini API key: passed at agent initialization via `genai.Client(api_key=...)`
 - Inbound A2A requests: no authentication enforced (suitable for internal/trusted networks)
 - All secrets loaded from environment variables, never hardcoded

@@ -1,13 +1,13 @@
 """
-Gemini-powered agent for the A2A ↔ Octane MCP wrapper.
+Gemini-powered agent for the A2A ↔ Opentext SDP MCP wrapper.
 
 Uses the official `google-genai` SDK (v1+).
 
 Replaces the keyword-based router with a real LLM agent that:
   1. Understands the user's natural-language request via Gemini
-  2. Selects and calls the correct Octane MCP tool(s) via function calling
+    2. Selects and calls the correct Opentext SDP MCP tool(s) via function calling
   3. Runs a multi-step agentic loop until Gemini produces a final answer
-  4. Returns a natural-language summary plus raw Octane data artifacts
+    4. Returns a natural-language summary plus raw Opentext SDP data artifacts
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ logger = logging.getLogger(__name__)
 # ── System prompt ────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """
-You are an OpenText Octane ALM assistant embedded in an enterprise agent.
-You help users query and manage ALM work items — defects, user stories,
+You are an Opentext SDP assistant embedded in an enterprise agent.
+You help users query and manage Opentext SDP work items — defects, user stories,
 features — and their comments.
 
 Guidelines:
-- Use the tools provided to fetch real data from Octane before answering.
+- Use the tools provided to fetch real data from Opentext SDP before answering.
 - After receiving tool results, present a clear, concise summary.
   Highlight key fields: ID, name, phase/status, severity/priority,
   assigned owner, sprint, and any other relevant metadata.
@@ -45,7 +45,7 @@ Guidelines:
 - For "my work items", list each item with its type, ID, name, and phase.
 - When creating or updating comments, confirm what was done.
 - You are fully authorised to compose, draft, or invent comment text for
-  ALM work items when the user asks you to. This is a core part of your job.
+    Opentext SDP work items when the user asks you to. This is a core part of your job.
   If the user says "invent something", "make something up", "put anything",
   or similar, compose a reasonable, professional-sounding comment related to
   the work item context (name, phase, type, etc.) and use it directly.
@@ -65,7 +65,7 @@ _GENERATE_TEXT_TRIGGERS = re.compile(
 _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="get_defect",
-        description="Retrieve a defect from Octane by its unique numeric ID.",
+        description="Retrieve a defect from Opentext SDP by its unique numeric ID.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -79,7 +79,7 @@ _TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="get_story",
-        description="Retrieve a user story from Octane by its unique numeric ID.",
+        description="Retrieve a user story from Opentext SDP by its unique numeric ID.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -93,7 +93,7 @@ _TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="get_feature",
-        description="Retrieve a feature from Octane by its unique numeric ID.",
+        description="Retrieve a feature from Opentext SDP by its unique numeric ID.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -108,7 +108,7 @@ _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="get_comments",
         description=(
-            "Retrieve all comments and discussion threads for a specific Octane "
+            "Retrieve all comments and discussion threads for a specific Opentext SDP "
             "entity (defect, story, or feature)."
         ),
         parameters=types.Schema(
@@ -130,7 +130,7 @@ _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="create_comment",
         description=(
-            "Post a new comment on an Octane work item. "
+            "Post a new comment on an Opentext SDP work item. "
             "The text field accepts HTML for rich formatting (bold, color, etc.)."
         ),
         parameters=types.Schema(
@@ -155,7 +155,7 @@ _TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="update_comment",
-        description="Update an existing comment on an Octane work item.",
+        description="Update an existing comment on an Opentext SDP work item.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -246,7 +246,7 @@ def _mcp_tool_to_declaration(tool: dict) -> types.FunctionDeclaration:
 
 class GeminiAgent:
     """
-    LLM agent that drives Octane tool calls through Gemini function calling.
+    LLM agent that drives Opentext SDP tool calls through Gemini function calling.
 
     Agentic loop per user turn:
       1. Send user message + tool definitions to Gemini.
@@ -280,11 +280,11 @@ class GeminiAgent:
         """
         Fetch the live tool list from the MCP server and update Gemini's
         function-calling configuration.  Called at startup and after a
-        /config change so new Octane tools are picked up without a restart.
+        /config change so new Opentext SDP tools are picked up without a restart.
 
         Returns the list of discovered tool names.
         Falls back silently to the built-in _TOOL_DECLARATIONS if discovery
-        fails (e.g. Octane is unreachable at startup).
+        fails (e.g. Opentext SDP is unreachable at startup).
         """
         try:
             raw = await mcp.list_tools()
@@ -322,13 +322,13 @@ class GeminiAgent:
 
         Args:
             user_text   – The user's natural-language request.
-            mcp         – MCP client for Octane tool calls.
+            mcp         – MCP client for Opentext SDP tool calls.
             context_id  – Session identifier; previous turns are replayed
                           so Gemini has full conversational context.
 
         Returns:
             summary   – Gemini's final natural-language answer.
-            artifacts – Raw Octane data artifacts collected during the turn.
+            artifacts – Raw Opentext SDP data artifacts collected during the turn.
         """
         artifacts: list[Artifact] = []
 
@@ -358,7 +358,7 @@ class GeminiAgent:
             # Execute every tool call Gemini requested
             fn_response_parts: list[types.Part] = []
             for fn_name, fn_args in fn_calls:
-                logger.info("Calling Octane tool=%s  args=%s", fn_name, fn_args)
+                logger.info("Calling Opentext SDP tool=%s  args=%s", fn_name, fn_args)
                 octane_response = await _call_octane(fn_name, fn_args, mcp)
 
                 if isinstance(octane_response, Artifact):
@@ -409,7 +409,7 @@ class GeminiAgent:
                     history_snippet += f"\n{content.role}: {txt[:300]}"
 
         prompt = (
-            "You are writing a comment for an OpenText Octane ALM work item. "
+            "You are writing a comment for an Opentext SDP work item. "
             "Based on the conversation history below, compose a short (1-3 sentences), "
             "relevant, and slightly witty comment appropriate for a professional software "
             "engineering team. Return ONLY the comment text, nothing else.\n\n"
@@ -487,14 +487,14 @@ async def _call_octane(
     mcp: OctaneMcpClient,
 ) -> Artifact | str:
     """
-    Execute a single Octane MCP tool call.
+    Execute a single Opentext SDP MCP tool call.
     Returns an Artifact on success, or an error string on failure.
     """
     try:
         return await execute_tool(tool_name, arguments, mcp)
     except OctaneMcpError as exc:
-        logger.error("Octane MCP error  tool=%s: %s", tool_name, exc)
-        return f"Octane error: {exc.message} (code {exc.code})"
+        logger.error("Opentext SDP MCP error  tool=%s: %s", tool_name, exc)
+        return f"Opentext SDP error: {exc.message} (code {exc.code})"
     except Exception as exc:
         logger.exception("Unexpected error calling tool=%s", tool_name)
         return f"Unexpected error: {exc}"
