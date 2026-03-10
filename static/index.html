@@ -358,6 +358,11 @@
     #settings-status.ok  { color: #6ee7b7; }
     #settings-status.err { color: #fca5a5; }
 
+    /* Gemini header indicator */
+    #gemini-indicator { color: #9ca3af; font-size:13px; display:flex; align-items:center; gap:8px; margin-left:auto }
+    #gemini-indicator.on { color: #6ee7b7 }
+    #gemini-indicator.off { color: #fca5a5 }
+
     /* Toggle switch */
     .toggle-row {
       display: flex;
@@ -414,6 +419,7 @@
   <div class="divider"></div>
   <h1>Octane ALM Agent</h1>
   <span>A2A Wrapper</span>
+  <div id="gemini-indicator" title="Gemini status" onclick="openSettings()" style="cursor:pointer;margin-left:12px">● Gemini: <span id="gemini-status-text">?</span></div>
   <button id="settings-btn" title="Octane connection settings" onclick="openSettings()">⚙</button>
 </header>
 
@@ -476,7 +482,7 @@
       <strong>Also available in Google AgentSpace:</strong> Register this agent at
       <code style="font-size:10px;color:#9ca3af">vertexaisearch.cloud.google.com</code>
       and invoke it with <code style="font-size:10px;color:#9ca3af">@Octane ALM Agent</code> from any AgentSpace conversation.
-      See <a href="https://github.com" style="color:#6366f1;text-decoration:none">README.md</a> for setup steps.
+      See <a id="readme-link" href="/readme" target="_blank" rel="noopener noreferrer" style="color:#6366f1;text-decoration:none">README.md</a> for setup steps (rendered markdown view).
     </div>
   </div>
 </div>
@@ -735,6 +741,42 @@
     if (e.target === document.getElementById('settings-overlay')) closeSettings();
   }
 
+  // Update the header Gemini indicator from the live /config endpoint
+  async function refreshStatus() {
+    try {
+      const res = await fetch('/config');
+      if (!res.ok) return;
+      const cfg = await res.json();
+      updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set);
+    } catch (e) {
+      // network error — set unknown state
+      updateGeminiIndicator(false, false, true);
+    }
+  }
+
+  function updateGeminiIndicator(enabled, apiKeySet, error = false) {
+    const el = document.getElementById('gemini-indicator');
+    const text = document.getElementById('gemini-status-text');
+    if (!el || !text) return;
+    if (error) {
+      el.classList.remove('on'); el.classList.add('off');
+      text.textContent = 'unknown';
+      el.title = 'Gemini status unknown (network) — click to open settings';
+      return;
+    }
+    if (enabled) {
+      el.classList.add('on'); el.classList.remove('off');
+      text.textContent = 'ON';
+      el.title = 'Gemini is active — click to open settings';
+    } else {
+      el.classList.remove('on'); el.classList.add('off');
+      text.textContent = apiKeySet ? 'OFF (fallback)' : 'OFF (no key)';
+      el.title = apiKeySet
+        ? 'Gemini is disabled (using keyword fallback) — click to open settings'
+        : 'Gemini unavailable (GEMINI_API_KEY not set) — click to open settings';
+    }
+  }
+
   async function saveSettings() {
     const saveBtn = document.getElementById('settings-save');
     const statusEl = document.getElementById('settings-status');
@@ -773,6 +815,8 @@
         document.getElementById('cfg-key-hint').textContent =
           data.api_key_masked ? `Token ends in: ${data.api_key_masked.slice(-4)}` : '';
         document.getElementById('cfg-key').value = '';
+        // Refresh header indicator to reflect runtime Gemini state
+        await refreshStatus();
         setTimeout(closeSettings, 1200);
       } else {
         statusEl.textContent = `Error: ${JSON.stringify(data)}`;
@@ -790,6 +834,10 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeSettings();
   });
+
+  // Initialise status on load and poll periodically
+  refreshStatus();
+  setInterval(refreshStatus, 60000); // refresh every 60s
 </script>
 </body>
 </html>

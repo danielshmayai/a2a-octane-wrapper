@@ -25,6 +25,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -310,6 +311,65 @@ async def agent_card(request: Request):
         content=card.model_dump(exclude_none=True),
         media_type="application/json",
     )
+
+
+@app.get("/raw-readme")
+async def raw_readme():
+        """Return the README.md file as plain text (useful for in-app rendering)."""
+        try:
+                return FileResponse("README.md", media_type="text/plain")
+        except Exception as exc:
+                logger.exception("Failed to read README.md: %s", exc)
+                raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/readme")
+async def readme():
+        """Serve a small HTML viewer that fetches /raw-readme and renders Markdown.
+
+        This avoids GitHub access issues for private repos and provides a rendered
+        Markdown view inside the app (opens in a new tab from the UI).
+        """
+        html = """
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>README.md</title>
+        <style>
+            body {
+                font-family: Segoe UI, Roboto, Arial, Helvetica, sans-serif;
+                padding: 24px;
+                background: #ffffff;
+                color: #111111;
+                line-height: 1.6;
+            }
+            a { color: #0366d6; }
+            pre, code { background: #f6f8fa; color: #111111; }
+            pre { padding: 12px; border-radius: 6px; overflow: auto; }
+            img { max-width: 100%; height: auto; }
+            .markdown-body { max-width: 880px; margin: 0 auto; }
+        </style>
+    </head>
+    <body>
+        <div class="markdown-body" id="content">Loading README…</div>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script>
+            fetch('/raw-readme').then(r=>{
+                if (!r.ok) throw new Error('Could not fetch README');
+                return r.text();
+            }).then(md=>{
+                // Use marked to render the markdown into the page
+                document.getElementById('content').innerHTML = marked.parse(md);
+            }).catch(err=>{
+                document.getElementById('content').textContent = 'Error loading README: ' + err.message;
+            });
+        </script>
+    </body>
+</html>
+"""
+        return HTMLResponse(content=html, status_code=200)
 
 
 # ── A2A SendMessage ─────────────────────────────────────────────────

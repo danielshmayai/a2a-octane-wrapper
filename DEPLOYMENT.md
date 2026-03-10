@@ -2,20 +2,91 @@
 
 This short guide helps a developer or operator who clones the repo get the wrapper running in development and deploy it to production.
 
-## Quickstart (developer)
+## Quickstart (developer) — step-by-step
 
-- Clone the repo and create a virtualenv as described in `README.md`.
-- Copy `.env.example` to `.env` and fill in the values (see the example file for required keys).
-- Install dependencies: `pip install -r requirements.txt`.
-- Start the server (development, auto-reload):
+This section walks you through a minimal local development workflow so you and other contributors can start working immediately.
+
+1. Clone the repository and change into the project directory:
 
 ```bash
-python main.py
-# or with uvicorn directly for faster startup iterations
+git clone <repo-url>
+cd a2a-octane-wrapper
+```
+
+2. Create and activate a Python virtual environment (recommended):
+
+Windows (PowerShell):
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS / Linux:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+3. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Create your local configuration file from the template and edit values:
+
+```bash
+copy env.example .env         # Windows (PowerShell)
+# or
+cp env.example .env           # macOS / Linux
+```
+
+Open `.env` in your editor and set at minimum:
+- `OCTANE_BASE_URL` — the Octane MCP server base URL (e.g. `http://localhost:8080`)
+- `API_KEY` — Octane bearer token
+- `DEFAULT_SHARED_SPACE_ID` and `DEFAULT_WORKSPACE_ID`
+
+Optional (to enable Gemini agent):
+- `GEMINI_API_KEY` — set this if you want LLM-powered responses
+
+5. Run the server locally (development mode with auto-reload):
+
+```bash
 python -m uvicorn main:app --host 0.0.0.0 --port 9000 --reload
 ```
 
-Visit `http://localhost:9000` for the chat UI and verify `/health` and `/.well-known/agent-card.json` are reachable.
+Or run without reload (production-like):
+
+```bash
+python -m uvicorn main:app --host 0.0.0.0 --port 9000
+```
+
+6. Verify the service is healthy and discoverable:
+
+```bash
+curl http://localhost:9000/health
+curl http://localhost:9000/.well-known/agent-card.json
+```
+
+7. Try the built-in chat UI in a browser:
+
+Open http://localhost:9000 and ask e.g. `Get defect 2110`.
+
+8. If you need to change the Octane server or API key at runtime (without restarting), use the runtime config endpoint from the UI `⚙` or call it directly:
+
+```bash
+curl -X POST http://localhost:9000/config \
+	-H "Content-Type: application/json" \
+	-d '{"octane_url":"http://localhost:8080","api_key":"NEW_TOKEN"}'
+```
+
+9. Inspect logs and troubleshooting tips:
+
+- Watch the terminal where `uvicorn` runs for startup messages and discovery logs.
+- If the wrapper cannot contact Octane, you will see `Could not auto-discover MCP tools` warnings — check `OCTANE_BASE_URL` and network reachability.
+- If the Gemini agent fails to initialise, the app will fall back to the keyword router; check that `GEMINI_API_KEY` is set and valid if you expect LLM behaviour.
+
+That’s it — you should now be able to develop and iterate locally. When you are ready to containerise or deploy, follow the Docker or systemd sections below.
 
 ## Docker (recommended for reproducible deploys)
 
