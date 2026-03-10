@@ -1,13 +1,11 @@
 """
 Gemini-powered agent for the A2A ↔ Opentext SDP MCP wrapper.
 
-Uses the official `google-genai` SDK (v1+).
-
-Replaces the keyword-based router with a real LLM agent that:
-  1. Understands the user's natural-language request via Gemini
-    2. Selects and calls the correct Opentext SDP MCP tool(s) via function calling
-  3. Runs a multi-step agentic loop until Gemini produces a final answer
-    4. Returns a natural-language summary plus raw Opentext SDP data artifacts
+Uses google-adk (Google Agent Development Kit) with:
+  1. LlmAgent — owns the system prompt, tools, and the multi-step function-calling loop
+  2. Runner + InMemorySessionService — drives each turn and keeps per-session history
+  3. Typed async Python functions (one per MCP tool) — ADK infers Gemini schemas from them
+  4. Per-run artifact list captured via closure — same A2A Artifact output as before
 """
 
 from __future__ import annotations
@@ -18,6 +16,9 @@ import re
 from typing import Any
 
 from google import genai
+from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 import config
@@ -59,257 +60,155 @@ _GENERATE_TEXT_TRIGGERS = re.compile(
 )
 
 
-# sharedSpaceId and workSpaceId are injected automatically by mcp_client,
-# so they are intentionally excluded from the declarations exposed to Gemini.
+# ── ADK tool functions ──────────────────────────────────────────────
+#
+# Each function is typed so google-adk can automatically infer a Gemini
+# FunctionDeclaration schema. They close over `mcp` and `_artifacts` so
+# the runner can call them directly without extra wiring.
+# sharedSpaceId / workSpaceId are injected by the MCP client automatically.
 
-_TOOL_DECLARATIONS = [
-    types.FunctionDeclaration(
-        name="get_defect",
-        description="Retrieve a defect from Opentext SDP by its unique numeric ID.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The numeric defect ID.",
-                ),
-            },
-            required=["entityId"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="get_story",
-        description="Retrieve a user story from Opentext SDP by its unique numeric ID.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The numeric story ID.",
-                ),
-            },
-            required=["entityId"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="get_feature",
-        description="Retrieve a feature from Opentext SDP by its unique numeric ID.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The numeric feature ID.",
-                ),
-            },
-            required=["entityId"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="get_comments",
-        description=(
-            "Retrieve all comments and discussion threads for a specific Opentext SDP "
-            "entity (defect, story, or feature)."
-        ),
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The entity ID.",
-                ),
-                "entityType": types.Schema(
-                    type=types.Type.STRING,
-                    description='Entity type: "defect", "story", or "feature".',
-                    enum=["defect", "story", "feature"],
-                ),
-            },
-            required=["entityId", "entityType"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="create_comment",
-        description=(
-            "Post a new comment on an Opentext SDP work item. "
-            "The text field accepts HTML for rich formatting (bold, color, etc.)."
-        ),
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The ID of the entity to comment on.",
-                ),
-                "entityType": types.Schema(
-                    type=types.Type.STRING,
-                    description='Entity type: "defect", "story", or "feature".',
-                    enum=["defect", "story", "feature"],
-                ),
-                "text": types.Schema(
-                    type=types.Type.STRING,
-                    description="Comment body text (HTML allowed).",
-                ),
-            },
-            required=["entityId", "entityType", "text"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="update_comment",
-        description="Update an existing comment on an Opentext SDP work item.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "commentId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The ID of the comment to update.",
-                ),
-                "entityId": types.Schema(
-                    type=types.Type.INTEGER,
-                    description="The ID of the entity the comment belongs to.",
-                ),
-                "entityType": types.Schema(
-                    type=types.Type.STRING,
-                    description='Entity type: "defect", "story", or "feature".',
-                    enum=["defect", "story", "feature"],
-                ),
-                "text": types.Schema(
-                    type=types.Type.STRING,
-                    description="New comment body text (HTML allowed).",
-                ),
-            },
-            required=["commentId", "entityId", "entityType", "text"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="fetch_My_Work_Items",
-        description=(
-            "Fetch the current user's assigned work items (defects, stories, "
-            "quality stories) ordered by user priority/rank."
-        ),
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={},
-            required=[],
-        ),
-    ),
-]
+def _build_tools(mcp: OctaneMcpClient, artifacts: list[Artifact]) -> list:
+    """Return a list of typed async functions, one per Opentext SDP MCP tool."""
 
-_OCTANE_TOOL = types.Tool(function_declarations=_TOOL_DECLARATIONS)
+    async def get_defect(entityId: int) -> str:
+        """Retrieve a defect from Opentext SDP by its unique numeric ID."""
+        return await _invoke("get_defect", {"entityId": entityId}, mcp, artifacts)
 
-# Params injected by mcp_client — must not be sent from Gemini
-_EXCLUDED_MCP_PARAMS: frozenset[str] = frozenset({"sharedSpaceId", "workSpaceId"})
+    async def get_story(entityId: int) -> str:
+        """Retrieve a user story from Opentext SDP by its unique numeric ID."""
+        return await _invoke("get_story", {"entityId": entityId}, mcp, artifacts)
 
-_GENAI_TYPE_MAP: dict[str, types.Type] = {
-    "string":  types.Type.STRING,
-    "integer": types.Type.INTEGER,
-    "number":  types.Type.NUMBER,
-    "boolean": types.Type.BOOLEAN,
-    "array":   types.Type.ARRAY,
-    "object":  types.Type.OBJECT,
-}
+    async def get_feature(entityId: int) -> str:
+        """Retrieve a feature from Opentext SDP by its unique numeric ID."""
+        return await _invoke("get_feature", {"entityId": entityId}, mcp, artifacts)
+
+    async def get_comments(entityId: int, entityType: str) -> str:
+        """Retrieve all comments for an entity (defect, story, or feature).
+        entityType must be one of: 'defect', 'story', 'feature'.
+        """
+        return await _invoke(
+            "get_comments", {"entityId": entityId, "entityType": entityType},
+            mcp, artifacts,
+        )
+
+    async def create_comment(entityId: int, entityType: str, text: str) -> str:
+        """Post a new comment on an Opentext SDP work item. HTML is allowed in text.
+        entityType must be one of: 'defect', 'story', 'feature'.
+        """
+        return await _invoke(
+            "create_comment",
+            {"entityId": entityId, "entityType": entityType, "text": text},
+            mcp, artifacts,
+        )
+
+    async def update_comment(
+        commentId: int, entityId: int, entityType: str, text: str
+    ) -> str:
+        """Update an existing comment on an Opentext SDP work item. HTML allowed.
+        entityType must be one of: 'defect', 'story', 'feature'.
+        """
+        return await _invoke(
+            "update_comment",
+            {"commentId": commentId, "entityId": entityId,
+             "entityType": entityType, "text": text},
+            mcp, artifacts,
+        )
+
+    async def fetch_My_Work_Items() -> str:
+        """Fetch the current user's assigned work items (defects, stories, tasks)."""
+        return await _invoke("fetch_My_Work_Items", {}, mcp, artifacts)
+
+    return [
+        get_defect, get_story, get_feature, get_comments,
+        create_comment, update_comment, fetch_My_Work_Items,
+    ]
 
 
-def _json_schema_to_genai(schema: dict) -> types.Schema:
-    """Recursively convert a JSON Schema dict to a google.genai types.Schema."""
-    t = _GENAI_TYPE_MAP.get((schema.get("type") or "string").lower(), types.Type.STRING)
-    kw: dict[str, Any] = {"type": t}
-    if "description" in schema:
-        kw["description"] = schema["description"]
-    if "enum" in schema:
-        kw["enum"] = [str(v) for v in schema["enum"]]
-    if t == types.Type.OBJECT:
-        filtered = {
-            k: v for k, v in schema.get("properties", {}).items()
-            if k not in _EXCLUDED_MCP_PARAMS
-        }
-        if filtered:
-            kw["properties"] = {k: _json_schema_to_genai(v) for k, v in filtered.items()}
-        req = [r for r in schema.get("required", []) if r not in _EXCLUDED_MCP_PARAMS]
-        if req:
-            kw["required"] = req
-    if t == types.Type.ARRAY and "items" in schema:
-        kw["items"] = _json_schema_to_genai(schema["items"])
-    return types.Schema(**kw)
+async def _invoke(
+    tool_name: str,
+    arguments: dict[str, Any],
+    mcp: OctaneMcpClient,
+    artifacts: list[Artifact],
+) -> str:
+    """Execute one MCP tool call, append its artifact, return text for Gemini."""
+    try:
+        artifact = await execute_tool(tool_name, arguments, mcp)
+        artifacts.append(artifact)
+        texts = [p.text for p in artifact.parts if p.text]
+        raw   = [str(p.data) for p in artifact.parts if p.data and not p.text]
+        return "\n".join(texts + raw) or str(artifact)
+    except OctaneMcpError as exc:
+        logger.error("SDP MCP error  tool=%s: %s", tool_name, exc)
+        return f"Opentext SDP error: {exc.message} (code {exc.code})"
+    except Exception as exc:
+        logger.exception("Unexpected error calling tool=%s", tool_name)
+        return f"Unexpected error: {exc}"
 
 
-def _mcp_tool_to_declaration(tool: dict) -> types.FunctionDeclaration:
-    """Convert one MCP tools/list entry into a Gemini FunctionDeclaration."""
-    raw = tool.get("inputSchema") or {"type": "object", "properties": {}}
-    return types.FunctionDeclaration(
-        name=tool["name"],
-        description=tool.get("description", ""),
-        parameters=_json_schema_to_genai(raw),
-    )
-
-
-# ── GeminiAgent ──────────────────────────────────────────────────────
+# ── GeminiAgent (google-adk) ─────────────────────────────────────────
 
 class GeminiAgent:
     """
-    LLM agent that drives Opentext SDP tool calls through Gemini function calling.
+    ADK-powered agent that drives Opentext SDP tool calls via Gemini.
 
-    Agentic loop per user turn:
-      1. Send user message + tool definitions to Gemini.
-      2. Gemini chooses a tool → execute it against Octane MCP.
-      3. Send the tool result back to Gemini as a FunctionResponse.
-      4. Repeat until Gemini returns a plain-text answer (no more calls).
-      5. Return (summary_text, [Artifact, ...]).
-
-    Conversation history is maintained per context_id so follow-up
-    questions (e.g. "show me the next one") retain full context.
+    Architecture:
+    - google-adk LlmAgent owns the system prompt, tool declarations, and the
+      multi-step function-calling loop (no more manual MAX_TOOL_ROUNDS loop).
+    - Runner + InMemorySessionService manage per-session conversation history
+      automatically (replaces the manual _histories dict).
+    - Tool functions are typed async closures; ADK infers Gemini schemas from
+      Python type annotations so no FunctionDeclaration boilerplate is needed.
+    - A2A Artifacts are collected into a per-run list that the closures write
+      into via closure capture (list is .clear()'d, never reassigned).
     """
-
-    MAX_TOOL_ROUNDS: int = 10   # safety cap — prevents infinite loops
-    MAX_HISTORY_TURNS: int = 40 # keep last N content blocks per context
 
     def __init__(self) -> None:
         if not config.GEMINI_API_KEY:
-            raise ValueError(
-                "GEMINI_API_KEY is not set. Add it to your .env file."
-            )
-        self._client = genai.Client(api_key=config.GEMINI_API_KEY)
-        self._chat_config = types.GenerateContentConfig(
-            system_instruction=_SYSTEM_PROMPT,
-            tools=[_OCTANE_TOOL],   # replaced by refresh_tools() at startup
+            raise ValueError("GEMINI_API_KEY is not set. Add it to your .env file.")
+        self._session_service = InMemorySessionService()
+        self._runner: Runner | None = None
+        self._current_mcp: OctaneMcpClient | None = None
+        # Shared artifact list — closures hold a reference to this list object.
+        # Use .clear() in run(), never reassign, so closures always see the same list.
+        self._run_artifacts: list[Artifact] = []
+        logger.info("GeminiAgent (ADK) ready  model=%s", config.GEMINI_MODEL)
+
+    def _rebuild_runner(self, mcp: OctaneMcpClient) -> None:
+        """Construct a fresh LlmAgent + Runner bound to *mcp*."""
+        tools = _build_tools(mcp, self._run_artifacts)
+        agent = LlmAgent(
+            name="opentext_sdp_agent",
+            model=config.GEMINI_MODEL,
+            instruction=_SYSTEM_PROMPT,
+            tools=tools,
         )
-        # Per-session conversation histories keyed by context_id
-        self._histories: dict[str, list[types.Content]] = {}
-        logger.info("GeminiAgent ready  model=%s", config.GEMINI_MODEL)
+        self._runner = Runner(
+            app_name="opentext_sdp_agent",
+            agent=agent,
+            session_service=self._session_service,
+            auto_create_session=True,
+        )
+        self._current_mcp = mcp
 
     async def refresh_tools(self, mcp: OctaneMcpClient) -> list[str]:
         """
-        Fetch the live tool list from the MCP server and update Gemini's
-        function-calling configuration.  Called at startup and after a
-        /config change so new Opentext SDP tools are picked up without a restart.
+        Rebuild the ADK Runner bound to the current MCP client.
+        Called at startup and after /config changes.
 
-        Returns the list of discovered tool names.
-        Falls back silently to the built-in _TOOL_DECLARATIONS if discovery
-        fails (e.g. Opentext SDP is unreachable at startup).
+        Verifies connectivity by listing live tools; falls back gracefully
+        if the Opentext SDP server is unreachable at startup.
         """
+        self._rebuild_runner(mcp)
         try:
             raw = await mcp.list_tools()
-            tools = raw.get("tools", [])
-            if not tools:
-                logger.warning("MCP tools/list returned no tools — keeping built-in declarations")
-                return []
-            declarations = [_mcp_tool_to_declaration(t) for t in tools]
-            self._chat_config = types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                tools=[types.Tool(function_declarations=declarations)],
+            names = [t["name"] for t in raw.get("tools", [])]
+            logger.info(
+                "GeminiAgent (ADK): %d MCP tools confirmed: %s", len(names), names
             )
-            names = [t["name"] for t in tools]
-            logger.info("GeminiAgent: discovered %d tools from MCP: %s", len(names), names)
             return names
         except Exception as exc:
-            logger.warning("Tool auto-discovery failed — using built-in declarations: %s", exc)
-            return []
-
-    def _get_history(self, context_id: str) -> list[types.Content]:
-        return self._histories.get(context_id, [])
-
-    def _save_history(self, context_id: str, history: list[types.Content]) -> None:
-        # Trim to avoid unbounded memory growth
-        self._histories[context_id] = history[-self.MAX_HISTORY_TURNS:]
+            logger.warning("Tool discovery failed (agent still operational): %s", exc)
+            return [fn.__name__ for fn in _build_tools(mcp, [])]
 
     async def run(
         self,
@@ -320,158 +219,82 @@ class GeminiAgent:
         """
         Run one full agentic turn for the given user message.
 
-        Args:
-            user_text   – The user's natural-language request.
-            mcp         – MCP client for Opentext SDP tool calls.
-            context_id  – Session identifier; previous turns are replayed
-                          so Gemini has full conversational context.
+        ADK's Runner handles the multi-step function-calling loop and stores
+        per-session history automatically (keyed by session_id = context_id).
 
         Returns:
             summary   – Gemini's final natural-language answer.
-            artifacts – Raw Opentext SDP data artifacts collected during the turn.
+            artifacts – Raw Opentext SDP data collected during this turn.
         """
-        artifacts: list[Artifact] = []
+        if self._runner is None or mcp is not self._current_mcp:
+            await self.refresh_tools(mcp)
 
-        # If the user wants us to invent/generate comment text, pre-generate it
-        # using a neutral Gemini call so the main loop receives concrete text.
-        user_text = await self._maybe_inject_generated_text(user_text, context_id)
+        # Reset per-run artifact list (.clear() keeps the same list object so
+        # the tool closures built in _rebuild_runner still point to it).
+        self._run_artifacts.clear()
 
-        # Restore prior conversation history for this session
-        history: list[types.Content] = list(self._get_history(context_id))
+        user_text = await self._maybe_inject_generated_text(user_text)
+        message = types.Content(role="user", parts=[types.Part(text=user_text)])
+        session_id = context_id or "default"
+        summary = ""
 
-        # Send first message
-        response = await self._send(history, user_text)
-        history.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
-        history.append(response.candidates[0].content)
-
-        for round_num in range(self.MAX_TOOL_ROUNDS):
-            fn_calls = _extract_function_calls(response)
-            if not fn_calls:
-                break  # Gemini is satisfied — plain-text answer ready
-
-            logger.info(
-                "Agent round %d: %d tool call(s) requested",
-                round_num + 1,
-                len(fn_calls),
-            )
-
-            # Execute every tool call Gemini requested
-            fn_response_parts: list[types.Part] = []
-            for fn_name, fn_args in fn_calls:
-                logger.info("Calling Opentext SDP tool=%s  args=%s", fn_name, fn_args)
-                octane_response = await _call_octane(fn_name, fn_args, mcp)
-
-                if isinstance(octane_response, Artifact):
-                    artifacts.append(octane_response)
-                    result_payload = _artifact_to_dict(octane_response)
-                else:
-                    result_payload = {"error": octane_response}
-
-                fn_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fn_name,
-                        response={"result": result_payload},
+        async for event in self._runner.run_async(
+            user_id="a2a_user",
+            session_id=session_id,
+            new_message=message,
+        ):
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    summary = "".join(
+                        p.text
+                        for p in event.content.parts
+                        if hasattr(p, "text") and p.text
                     )
-                )
+                break
 
-            # Send all tool results back to Gemini and continue the loop
-            fn_content = types.Content(role="user", parts=fn_response_parts)
-            history.append(fn_content)
-            response = await self._send_content(history)
-            history.append(response.candidates[0].content)
+        return summary or "(no response from model)", list(self._run_artifacts)
 
-        summary = _extract_text(response)
-
-        # Persist updated history so follow-up questions retain context
-        if context_id:
-            self._save_history(context_id, history)
-
-        return summary, artifacts
-
-    async def _maybe_inject_generated_text(
-        self, user_text: str, context_id: str
-    ) -> str:
+    async def _maybe_inject_generated_text(self, user_text: str) -> str:
         """
-        If the user is asking us to invent / make up comment text, pre-generate
-        a concrete string via a plain Gemini call and splice it into the message
-        so the agentic loop receives unambiguous instructions.
+        If the user asks for invented comment text, pre-generate a concrete
+        string via a plain Gemini call and splice it into the message so the
+        agentic loop receives unambiguous instructions.
         """
         if not _GENERATE_TEXT_TRIGGERS.search(user_text):
-            return user_text  # nothing to do
-
-        # Build a context hint from recent history (last few turns)
-        history = self._get_history(context_id)
-        history_snippet = ""
-        for content in history[-6:]:
-            for part in content.parts:
-                txt = getattr(part, "text", None)
-                if txt:
-                    history_snippet += f"\n{content.role}: {txt[:300]}"
+            return user_text
 
         prompt = (
             "You are writing a comment for an Opentext SDP work item. "
-            "Based on the conversation history below, compose a short (1-3 sentences), "
-            "relevant, and slightly witty comment appropriate for a professional software "
-            "engineering team. Return ONLY the comment text, nothing else.\n\n"
-            f"Conversation so far:{history_snippet}\n\n"
-            f"User's latest request: {user_text}"
+            "Compose a short (1-3 sentences), relevant, and slightly witty comment "
+            "appropriate for a professional software engineering team. "
+            "Return ONLY the comment text, nothing else.\n\n"
+            f"User's request: {user_text}"
         )
-
         try:
+            client = genai.Client(api_key=config.GEMINI_API_KEY)
+
             def _sync():
-                return self._client.models.generate_content(
+                return client.models.generate_content(
                     model=config.GEMINI_MODEL,
                     contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
-                    config=types.GenerateContentConfig(),  # no tools, no system prompt
+                    config=types.GenerateContentConfig(),
                 )
+
             result = await asyncio.to_thread(_sync)
             generated = _extract_text(result).strip().strip('"').strip("'")
             if generated and "(no response" not in generated:
                 logger.info("Pre-generated comment text: %r", generated)
-                return (
-                    f"{user_text}. Use exactly this text for the comment: \"{generated}\""
-                )
+                return f'{user_text}. Use exactly this text for the comment: "{generated}"'
         except Exception as exc:
             logger.warning("Failed to pre-generate comment text: %s", exc)
 
         return user_text
 
-    async def _send(self, history: list[types.Content], text: str) -> Any:
-        """Send a text message to Gemini (runs sync SDK in a thread)."""
-        def _sync():
-            return self._client.models.generate_content(
-                model=config.GEMINI_MODEL,
-                contents=history + [types.Content(role="user", parts=[types.Part(text=text)])],
-                config=self._chat_config,
-            )
-        return await asyncio.to_thread(_sync)
-
-    async def _send_content(self, history: list[types.Content]) -> Any:
-        """Send the current conversation history to Gemini."""
-        def _sync():
-            return self._client.models.generate_content(
-                model=config.GEMINI_MODEL,
-                contents=history,
-                config=self._chat_config,
-            )
-        return await asyncio.to_thread(_sync)
-
 
 # ── Private helpers ──────────────────────────────────────────────────
 
-def _extract_function_calls(response: Any) -> list[tuple[str, dict[str, Any]]]:
-    """Return (name, args) for every FunctionCall part in the response."""
-    calls = []
-    for candidate in response.candidates:
-        for part in candidate.content.parts:
-            fc = getattr(part, "function_call", None)
-            if fc and getattr(fc, "name", None):
-                calls.append((fc.name, dict(fc.args)))
-    return calls
-
-
 def _extract_text(response: Any) -> str:
-    """Extract all plain-text content from a Gemini response."""
+    """Extract all plain-text parts from a google-genai GenerateContentResponse."""
     texts = []
     for candidate in response.candidates:
         for part in candidate.content.parts:
@@ -479,41 +302,3 @@ def _extract_text(response: Any) -> str:
             if text:
                 texts.append(text)
     return "\n".join(texts) if texts else "(no response from model)"
-
-
-async def _call_octane(
-    tool_name: str,
-    arguments: dict[str, Any],
-    mcp: OctaneMcpClient,
-) -> Artifact | str:
-    """
-    Execute a single Opentext SDP MCP tool call.
-    Returns an Artifact on success, or an error string on failure.
-    """
-    try:
-        return await execute_tool(tool_name, arguments, mcp)
-    except OctaneMcpError as exc:
-        logger.error("Opentext SDP MCP error  tool=%s: %s", tool_name, exc)
-        return f"Opentext SDP error: {exc.message} (code {exc.code})"
-    except Exception as exc:
-        logger.exception("Unexpected error calling tool=%s", tool_name)
-        return f"Unexpected error: {exc}"
-
-
-def _artifact_to_dict(artifact: Artifact) -> dict[str, Any]:
-    """Flatten an Artifact's parts into a JSON-serialisable dict for Gemini."""
-    result: dict[str, Any] = {}
-    text_blocks: list[str] = []
-
-    for part in artifact.parts:
-        if part.data and isinstance(part.data, dict):
-            result.update(part.data)
-        elif part.data:
-            result["raw"] = part.data
-        elif part.text:
-            text_blocks.append(part.text)
-
-    if text_blocks:
-        result["text"] = "\n".join(text_blocks)
-
-    return result

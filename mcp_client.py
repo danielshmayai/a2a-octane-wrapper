@@ -1,13 +1,15 @@
 """
-Stateless HTTP-POST MCP Client for the Opentext SDP MCP Server.
+MCP Client using the official `mcp` Python SDK with Streamable HTTP transport.
 
-The Opentext SDP MCP server does NOT use SSE or STDIO transports.
-It exposes a single endpoint at  POST <base_url>/mcp  that accepts
-standard JSON-RPC 2.0 payloads and returns JSON-RPC 2.0 responses.
+The Opentext SDP MCP server exposes a single endpoint at POST <base_url>/mcp.
+The MCP SDK's Streamable HTTP transport (spec 2025-03-26) is fully compatible
+with this endpoint — it uses the same POST + Accept: application/json,
+text/event-stream handshake, and drives the standard MCP initialize →
+tools/list → tools/call flow over a ClientSession.
 
-Every request must carry:
+Every request carries:
     - Authorization: Bearer <API_KEY>  header
-    - sharedSpaceId and workSpaceId inside params.arguments
+    - sharedSpaceId and workSpaceId injected into params.arguments
 """
 
 from __future__ import annotations
@@ -18,23 +20,23 @@ import os
 
 import httpx
 from dotenv import load_dotenv
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 import config
 
 logger = logging.getLogger(__name__)
 
-# Monotonically increasing JSON-RPC request id (per-process)
-_jsonrpc_id_counter: int = 0
-
-
-def _next_id() -> int:
-    global _jsonrpc_id_counter
-    _jsonrpc_id_counter += 1
-    return _jsonrpc_id_counter
-
 
 class OctaneMcpClient:
-    """Thin async wrapper around Opentext SDP's stateless HTTP MCP endpoint."""
+    """
+    Async MCP client for the Opentext SDP HTTP endpoint.
+
+    Uses the official `mcp` SDK with the Streamable HTTP transport:
+      - Opens a short-lived ClientSession for each call (stateless like the server)
+      - Drives the standard initialize → tools/call (or tools/list) exchange
+      - Falls back to None Authorization header when no API key is configured
+    """
 
     def __init__(
         self,
@@ -42,11 +44,7 @@ class OctaneMcpClient:
         api_key: str | None = None,
         timeout: int = config.MCP_REQUEST_TIMEOUT_SECONDS,
     ):
-        # Resolve API key: prefer explicit non-empty param, then config value, then environment
         resolved_key = api_key or config.API_KEY or os.getenv("API_KEY", "")
-
-        # If we still don't have a key, attempt to (re)load a local .env file
-        # so users can drop an .env after the process started and have it picked up.
         if not resolved_key:
             try:
                 load_dotenv()
@@ -54,48 +52,20 @@ class OctaneMcpClient:
                 if resolved_key:
                     logger.info("Loaded API_KEY from .env at runtime")
             except Exception:
-                # Non-fatal: proceed without Authorization header
                 logger.debug("Could not load .env or no API_KEY present")
 
         self._url = base_url
-        self._headers = {
-            "Content-Type": "application/json",
+        self._headers: dict[str, str] = {
             "Accept": "application/json, text/event-stream",
         }
-        # Only set Authorization header when we have a non-empty API key
         if resolved_key:
             self._headers["Authorization"] = f"Bearer {resolved_key}"
         else:
-            logger.debug("No API_KEY configured; MCP requests will be sent without Authorization header")
+            logger.debug("No API_KEY configured; requests sent without Authorization header")
 
-        self._timeout = timeout
+        self._timeout = float(timeout)
 
-    # ── Core transport ───────────────────────────────────────────────
-
-    async def _post(self, payload: dict) -> dict:
-        """Send a single JSON-RPC 2.0 request and return the parsed response."""
-        logger.info("MCP >>> %s  payload=%s", self._url, payload)
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                self._url, json=payload, headers=self._headers
-            )
-            if resp.is_error:
-                # Log the full response body before raising so we can see why Opentext SDP rejected the request
-                try:
-                    err_body = resp.json()
-                except Exception:
-                    err_body = resp.text
-                logger.error(
-                    "MCP HTTP %s error  url=%s  request=%s  response=%s",
-                    resp.status_code, self._url, payload, err_body,
-                )
-                resp.raise_for_status()
-            body = resp.json()
-
-        logger.info("MCP <<< status=%s  body=%s", resp.status_code, body)
-        return body
-
-    # ── Public helpers ───────────────────────────────────────────────
+    # ── Public API ───────────────────────────────────────────────────
 
     async def call_tool(
         self,
@@ -109,77 +79,67 @@ class OctaneMcpClient:
         Invoke an MCP tool on the Opentext SDP server.
 
         Automatically injects the mandatory sharedSpaceId / workSpaceId
-        context variables into the arguments dict.
-
-        Returns the raw JSON-RPC result object, or raises on transport error.
+        context variables. Returns a dict with a "content" list, or raises
+        OctaneMcpError on server-side errors.
         """
-        # Inject mandatory Opentext SDP context into every call
-        arguments["sharedSpaceId"] = (
-            shared_space_id or config.DEFAULT_SHARED_SPACE_ID
-        )
-        arguments["workSpaceId"] = (
-            workspace_id or config.DEFAULT_WORKSPACE_ID
-        )
+        arguments = dict(arguments)  # don't mutate caller's dict
+        arguments["sharedSpaceId"] = shared_space_id or config.DEFAULT_SHARED_SPACE_ID
+        arguments["workSpaceId"] = workspace_id or config.DEFAULT_WORKSPACE_ID
 
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments,
-            },
-            "id": _next_id(),
-        }
+        logger.info("MCP >>> call_tool=%s  url=%s  args=%s", tool_name, self._url, arguments)
 
-        body = await self._post(payload)
-        return self._parse_response(body)
+        async with streamablehttp_client(
+            self._url, headers=self._headers, timeout=self._timeout
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
 
-    async def list_tools(self) -> dict:
-        """Ask the Opentext SDP MCP server which tools it exposes."""
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "tools/list",
-            "params": {},
-            "id": _next_id(),
-        }
-        body = await self._post(payload)
-        return self._parse_response(body)
+        logger.info("MCP <<< call_tool=%s  isError=%s", tool_name, result.isError)
 
-    # ── Response parsing ─────────────────────────────────────────────
-
-    @staticmethod
-    def _parse_response(body: dict) -> dict:
-        """
-        Parse a JSON-RPC 2.0 response from Opentext SDP.
-
-        Opentext SDP may return errors in two ways:
-          1. Standard JSON-RPC "error" key  → {"error": {"code": ..., "message": ...}}
-          2. A successful result containing an isError flag inside content items.
-
-        Both cases are normalised into a consistent structure.
-        """
-        # Case 1: top-level JSON-RPC error object
-        if "error" in body:
-            err = body["error"]
-            raise OctaneMcpError(
-                code=err.get("code", -1),
-                message=err.get("message", "Unknown MCP error"),
-                data=err.get("data"),
-            )
-
-        result = body.get("result", {})
-
-        # Case 2: Octane wraps errors inside content with isError=true
-        if result.get("isError"):
-            # Extract the first text content block as the error message
-            content_items = result.get("content", [])
+        if result.isError:
+            content_items = result.content or []
             msg = next(
-                (c.get("text", "") for c in content_items if c.get("type") == "text"),
+                (getattr(c, "text", "") for c in content_items if getattr(c, "text", "")),
                 "Tool returned an error",
             )
-            raise OctaneMcpError(code=-32000, message=msg, data=result)
+            raise OctaneMcpError(code=-32000, message=msg, data=str(result))
 
-        return result
+        return {
+            "content": [
+                {"type": getattr(c, "type", "text"), "text": getattr(c, "text", None)}
+                for c in (result.content or [])
+            ]
+        }
+
+    async def list_tools(self) -> dict:
+        """Return the list of tools the Opentext SDP MCP server exposes."""
+        logger.info("MCP >>> list_tools  url=%s", self._url)
+
+        async with streamablehttp_client(
+            self._url, headers=self._headers, timeout=self._timeout
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.list_tools()
+
+        tools = result.tools or []
+        logger.info("MCP <<< list_tools  count=%d", len(tools))
+
+        return {
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "inputSchema": (
+                        t.inputSchema
+                        if isinstance(t.inputSchema, dict)
+                        else t.inputSchema.model_dump() if t.inputSchema else {}
+                    ),
+                }
+                for t in tools
+            ]
+        }
 
 
 class OctaneMcpError(Exception):
