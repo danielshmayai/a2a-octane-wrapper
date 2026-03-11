@@ -6,7 +6,7 @@ A lightweight Python service that bridges the **Google Agent-to-Agent (A2A) prot
 
 ## Ways to Use This Agent
 
-Once the wrapper is running (`python main.py`), you can interact with the Opentext SDP agent in four different ways — no enterprise account required for options 1–3:
+Once the wrapper is running (`python main.py`), you can interact with the OT ADM Agent in four different ways — no enterprise account required for options 1–3:
 
 | # | Option | Access | Best for |
 |---|---|---|---|
@@ -236,6 +236,8 @@ Dependencies installed:
 | `python-dotenv` | `.env` file loading |
 | `google-genai` | Gemini function-calling SDK |
 | `aiofiles` | Async static file serving |
+| `mcp` | Official MCP SDK; streamable HTTP transport for Opentext SDP `/mcp` |
+| `google-adk` | Google Agent Development Kit (ADK) — LlmAgent + Runner for agent orchestration |
 
 ### 4.3 Configure environment variables
 
@@ -419,7 +421,7 @@ Features:
 
 ### What you will achieve
 
-After registration, the Opentext SDP Agent appears in the `@` popover alongside built-in Google agents:
+After registration, the OT ADM Agent appears in the `@` popover alongside built-in Google agents:
 
 ```
 ┌────────────────────────────────────────────────┐
@@ -432,7 +434,7 @@ After registration, the Opentext SDP Agent appears in the `@` popover alongside 
 │  │   AI-powered document analysis an…        │  │
 │  │ ● Deep Research                           │  │
 │  │   Get in-depth answers grounded in…       │  │
-│  │ ● Opentext SDP Agent          ◄── yours     │  │  ← appears after registration
+│  │ ● OT ADM Agent                ◄── yours     │  │  ← appears after registration
 │  │   Query and manage Opentext SDP work…       │  │
 │  └───────────────────────────────────────────┘  │
 │                                                 │
@@ -529,7 +531,7 @@ Paste the full JSON output into the **Agent card JSON** field. Example of what s
 
 ```json
 {
-  "name": "Opentext SDP Agent",
+  "name": "OT ADM Agent",
   "description": "Query and manage Opentext SDP work items — defects, stories, features, comments, and personal work lists — using natural language.",
   "version": "1.0.0",
   "url": "https://abc123.ngrok-free.app/message:send",
@@ -556,7 +558,7 @@ Click **Preview agent details** to validate, then click **Next**.
 
 You will be asked to configure authentication. This step is **optional** — it is only required if the agent needs to access **Google Cloud resources** (e.g. BigQuery) on behalf of users.
 
-**For the Opentext SDP Agent, which connects to Opentext SDP (not Google Cloud):**
+**For the OT ADM Agent, which connects to Opentext SDP (not Google Cloud):**
 
 → Click **Skip & Finish**.
 
@@ -577,15 +579,15 @@ The Client ID, Client Secret, Authorization URI, and Token URI must come from a 
 
 After clicking **Finish** (or **Skip & Finish**):
 
-- The **Opentext SDP Agent** now appears in the Gemini Enterprise web app's `@` popover.
-- Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **Opentext SDP Agent**.
+ - The **OT ADM Agent** now appears in the Gemini Enterprise web app's `@` popover.
+ - Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **OT ADM Agent**.
 
 ```
-@Opentext SDP Agent Get defect 2110
-@Opentext SDP Agent What are my work items?
-@Opentext SDP Agent Show comments on story 55
-@Opentext SDP Agent Add a comment to defect 2110 saying "Under investigation"
-@Opentext SDP Agent Get feature 200 and summarize it
+@OT ADM Agent Get defect 2110
+@OT ADM Agent What are my work items?
+@OT ADM Agent Show comments on story 55
+@OT ADM Agent Add a comment to defect 2110 saying "Under investigation"
+@OT ADM Agent Get feature 200 and summarize it
 ```
 
 Gemini Enterprise forwards the message to your wrapper's `/message:send` endpoint via the A2A protocol. The Gemini agent fetches the data from Opentext SDP and returns a natural-language reply inline in the chat.

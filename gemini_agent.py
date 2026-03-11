@@ -177,13 +177,13 @@ class GeminiAgent:
         """Construct a fresh LlmAgent + Runner bound to *mcp*."""
         tools = _build_tools(mcp, self._run_artifacts)
         agent = LlmAgent(
-            name="opentext_sdp_agent",
+            name="ot_adm_agent",
             model=config.GEMINI_MODEL,
             instruction=_SYSTEM_PROMPT,
             tools=tools,
         )
         self._runner = Runner(
-            app_name="opentext_sdp_agent",
+            app_name="ot_adm_agent",
             agent=agent,
             session_service=self._session_service,
             auto_create_session=True,

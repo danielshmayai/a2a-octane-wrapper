@@ -48,6 +48,10 @@ Open `.env` in your editor and set at minimum:
 
 Optional (to enable Gemini agent):
 - `GEMINI_API_KEY` — set this if you want LLM-powered responses
+Note: the project now uses the official `mcp` Python SDK (streamable HTTP transport)
+and the `google-adk` (Agent Development Kit). Ensure your environment can install
+these packages (they're listed in `requirements.txt`) and that outbound HTTPS
+access to Google's Generative API is allowed if `GEMINI_API_KEY` is set.
 
 5. Run the server locally (development mode with auto-reload):
 

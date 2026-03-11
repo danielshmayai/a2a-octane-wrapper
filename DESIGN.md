@@ -161,7 +161,7 @@ A2A Task (COMPLETED or FAILED depending on severity)
 
 ### What is AgentSpace?
 
-**Google AgentSpace** (`vertexaisearch.cloud.google.com`) is Google's enterprise AI assistant platform. It supports **external A2A agents** that users can invoke with `@AgentName` directly from the chat interface. When a user types `@` in the chat input, a popover appears listing all available agents — built-in ones (like "Deep Research") and any registered external agents (like the Opentext SDP Agent).
+**Google AgentSpace** (`vertexaisearch.cloud.google.com`) is Google's enterprise AI assistant platform. It supports **external A2A agents** that users can invoke with `@AgentName` directly from the chat interface. When a user types `@` in the chat input, a popover appears listing all available agents — built-in ones (like "Deep Research") and any registered external agents (like the OT ADM Agent).
 
 The screenshot below shows what this looks like in practice:
 
@@ -186,7 +186,7 @@ The screenshot below shows what this looks like in practice:
 └─────────────────────────────────────────────────┘
 ```
 
-After registering the Opentext SDP Agent, it appears in this list and users can type `@Opentext SDP Agent Get defect 2110` to query Opentext SDP directly from AgentSpace.
+After registering the OT ADM Agent, it appears in this list and users can type `@OT ADM Agent Get defect 2110` to query Opentext SDP directly from AgentSpace.
 
 ### A2A Protocol Primer
 
@@ -205,7 +205,7 @@ AgentSpace (cloud)                A2A Opentext SDP Wrapper (your server)
        │── GET /.well-known/agent-card.json ──►│
        │◄── AgentCard JSON ────────────────────│
        │                                       │
-      │  (user types @Opentext SDP Agent ...)   │
+      │  (user types @OT ADM Agent ...)   │
        │                                       │
        │── POST /message:send ────────────────►│
        │   { message: {                        │
@@ -219,6 +219,25 @@ AgentSpace (cloud)                A2A Opentext SDP Wrapper (your server)
        │     }}} ─────────────────────────────│
        │                                       │
 ```
+
+## Implementation Notes (2026-03-10)
+
+Recent refactor (migration to official SDKs):
+
+- `mcp_client.py` now uses the official `mcp` Python SDK with the Streamable
+   HTTP transport (`streamablehttp_client` + `ClientSession`). This replaces the
+   previous hand-rolled JSON-RPC client and opens a short-lived `ClientSession`
+   per call to remain stateless with the Opentext SDP `/mcp` endpoint.
+
+- `gemini_agent.py` now uses the `google-adk` (Agent Development Kit) pattern:
+   define typed async tool functions (ADK infers Gemini function schemas),
+   build an `LlmAgent` and drive it with `Runner` + `InMemorySessionService`.
+   The Runner handles multi-step function calling and per-session history.
+
+- `requirements.txt` was updated to include `mcp>=1.5.0` and `google-adk>=1.0.0`.
+
+These changes improve compatibility with upstream SDKs, reduce custom
+serialization code, and make the agent easier to reason about and test.
 
 ### Network Requirements
 
@@ -262,6 +281,7 @@ curl https://<your-public-url>/health
 1. Open AgentSpace at `https://vertexaisearch.cloud.google.com`
 2. In the chat input box, **type `@`** — the Agents popover appears (as in the screenshot above)
 3. If "Opentext SDP Agent" is not yet in the list, look for **"Connect an agent"** or **"Add external agent"** in the popover or the left sidebar Agents panel
+3. If "OT ADM Agent" is not yet in the list, look for **"Connect an agent"** or **"Add external agent"** in the popover or the left sidebar Agents panel
 
 **Step 4 — Enter the agent URL**
 
@@ -270,7 +290,7 @@ curl https://<your-public-url>/health
    https://<your-public-url>
    ```
 2. AgentSpace automatically fetches `/.well-known/agent-card.json` and displays:
-   - Agent name: **Opentext SDP Agent**
+   - Agent name: **OT ADM Agent**
    - Description from the AgentCard
    - List of skills: Get Defect, Get Story, Get Feature, Get Comments, Create Comment, Update Comment, Fetch My Work Items
 
@@ -278,16 +298,16 @@ curl https://<your-public-url>/health
 
 Click **Save** — the agent now appears in the `@` mention popover alongside other agents.
 
-**Step 6 — Invoke the Opentext SDP agent from AgentSpace chat**
+**Step 6 — Invoke the OT ADM Agent from AgentSpace chat**
 
-Type `@` in the chat input, select **Opentext SDP Agent**, and continue with your request:
+Type `@` in the chat input, select **OT ADM Agent**, and continue with your request:
 
 ```
-@Opentext SDP Agent Get defect 2110
-@Opentext SDP Agent What are my work items?
-@Opentext SDP Agent Add a comment to defect 2110 saying "Fixed in 5.3"
-@Opentext SDP Agent Show comments on story 55
-@Opentext SDP Agent Get feature 200 and summarize it
+@OT ADM Agent Get defect 2110
+@OT ADM Agent What are my work items?
+@OT ADM Agent Add a comment to defect 2110 saying "Fixed in 5.3"
+@OT ADM Agent Show comments on story 55
+@OT ADM Agent Get feature 200 and summarize it
 ```
 
 AgentSpace forwards the message to `/message:send` using the A2A protocol. The Gemini agent fetches data from Opentext SDP and returns a natural-language reply displayed inline in AgentSpace.

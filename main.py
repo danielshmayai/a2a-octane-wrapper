@@ -250,7 +250,7 @@ def _build_agent_card(base_url: str) -> AgentCard:
     ]
 
     return AgentCard(
-        name="Opentext SDP Agent",
+        name="OT ADM Agent",
         description=(
             "An agent that provides read access to Opentext SDP data "
             "(defects, user stories, features) via the Opentext SDP MCP Server."

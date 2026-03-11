@@ -1,6 +1,6 @@
 {
-  "name": "Opentext SDP Agent",
-  "description": "Query and manage Opentext SDP work items — defects, stories, features, comments, and personal work lists — using natural language. Powered by a Gemini function-calling agent. Invoke with @Opentext SDP Agent in Google AgentSpace.",
+  "name": "OT ADM Agent",
+  "description": "Query and manage Opentext SDP work items — defects, stories, features, comments, and personal work lists — using natural language. Powered by a Gemini function-calling agent. Invoke with @OT ADM Agent in Google AgentSpace.",
   "version": "1.0.0",
   "supportedInterfaces": [
     {
@@ -31,7 +31,7 @@
       "id": "get_defect",
       "name": "Get Defect",
       "description": "Retrieve a defect raw data from Opentext SDP by its unique identifier.",
-      "tags": ["Opentext SDP", "Opentext SDP", "defect", "read"],
+      "tags": ["Opentext", "SDP", "defect", "read"],
       "examples": [
         "Get defect 2110",
         "Show me bug #9001",
@@ -44,7 +44,7 @@
       "id": "get_story",
       "name": "Get Story",
       "description": "Retrieve a story raw data from Opentext SDP by its unique identifier.",
-      "tags": ["Opentext SDP", "Opentext SDP", "story", "read"],
+      "tags": ["Opentext", "SDP", "story", "read"],
       "examples": [
         "Get story 1234",
         "Show me user story 55",
@@ -57,7 +57,7 @@
       "id": "get_feature",
       "name": "Get Feature",
       "description": "Retrieve raw data for a feature from Opentext SDP by its unique identifier.",
-      "tags": ["Opentext SDP", "Opentext SDP", "feature", "read"],
+      "tags": ["Opentext", "SDP", "feature", "read"],
       "examples": [
         "Get feature 77",
         "Show me feature 200",
@@ -70,7 +70,7 @@
       "id": "get_comments",
       "name": "Get Comments",
       "description": "Retrieve all comments and discussion threads for a specific entity (defect, story, or feature). Use this when asked to summarize discussions, review feedback, or understand the conversation around an entity.",
-      "tags": ["Opentext SDP", "Opentext SDP", "comments", "discussion", "read"],
+      "tags": ["Opentext", "SDP", "comments", "discussion", "read"],
       "examples": [
         "Show comments on defect 2110",
         "Get the discussion for story 55",
@@ -83,7 +83,7 @@
       "id": "create_comment",
       "name": "Create Comment",
       "description": "Creates a comment for the specified work item. The text parameter accepts HTML, allowing rich formatting such as bold, color, and font changes.",
-      "tags": ["Opentext SDP", "Opentext SDP", "comments", "write"],
+      "tags": ["Opentext", "SDP", "comments", "write"],
       "examples": [
         "Add a comment to defect 2110 saying 'Reproduced on build 5.3'",
         "Comment on story 55: needs clarification",
@@ -96,7 +96,7 @@
       "id": "update_comment",
       "name": "Update Comment",
       "description": "Updates an existing comment on a work item. The text parameter accepts HTML for rich formatting.",
-      "tags": ["Opentext SDP", "Opentext SDP", "comments", "write"],
+      "tags": ["Opentext", "SDP", "comments", "write"],
       "examples": [
         "Update comment 99 on defect 2110 with new text",
         "Edit comment 12 on story 55"
@@ -108,7 +108,7 @@
       "id": "fetch_My_Work_Items",
       "name": "Fetch My Work Items",
       "description": "Fetches the current user's assigned work items (stories, defects, quality stories) including metadata like ID, name, phase, priority, story points, sprint, owner, severity, and more. Results are ordered by user priority/rank.",
-      "tags": ["Opentext SDP", "Opentext SDP", "my work", "assigned", "backlog"],
+      "tags": ["Opentext", "SDP", "my work", "assigned", "backlog"],
       "examples": [
         "What are my work items?",
         "Show my assigned defects and stories",
