@@ -364,6 +364,78 @@
     #gemini-indicator.on { color: #6ee7b7 }
     #gemini-indicator.off { color: #fca5a5 }
 
+    /* Simulate A2A toggle button */
+    #sim-toggle {
+      font-size: 12px;
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px solid #2a2d3d;
+      background: transparent;
+      color: #6b7280;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #sim-toggle:hover { border-color: #6366f1; color: #a5b4fc; }
+    #sim-toggle.sim-on {
+      background: #1e1b4b;
+      border-color: #6366f1;
+      color: #a5b4fc;
+    }
+
+    /* Auth flow visualization toggle */
+    #viz-toggle {
+      font-size: 12px;
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px solid #2a2d3d;
+      background: transparent;
+      color: #6b7280;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #viz-toggle:hover { border-color: #10b981; color: #6ee7b7; }
+    #viz-toggle.viz-on {
+      background: #064e3b;
+      border-color: #10b981;
+      color: #6ee7b7;
+    }
+
+    /* A2A flow trace card in chat */
+    .a2a-trace {
+      align-self: flex-start;
+      max-width: 90%;
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-left: 3px solid #6366f1;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 11.5px;
+      font-family: "Fira Code", "Cascadia Code", "Consolas", monospace;
+      color: #6b7280;
+      line-height: 1.8;
+    }
+    .a2a-trace .trace-title {
+      font-size: 11px;
+      color: #6366f1;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .a2a-trace .step { display: flex; gap: 8px; align-items: flex-start; }
+    .a2a-trace .step-icon { flex-shrink: 0; width: 14px; }
+    .a2a-trace .step.pending { color: #374151; }
+    .a2a-trace .step.active  { color: #a5b4fc; }
+    .a2a-trace .step.ok      { color: #6ee7b7; }
+    .a2a-trace .step.err     { color: #fca5a5; }
+    .a2a-trace .step-line    { white-space: pre-wrap; word-break: break-all; }
+
     /* Toggle switch */
     .toggle-row {
       display: flex;
@@ -421,6 +493,8 @@
   <h1>OT ADM Agent</h1>
   <span>A2A Wrapper</span>
   <div id="gemini-indicator" title="Gemini status" onclick="openSettings()" style="cursor:pointer;margin-left:12px">● Gemini: <span id="gemini-status-text">?</span></div>
+  <button id="sim-toggle" title="Simulate the real Gemini A2A authentication flow" onclick="toggleSimulate()">🤖 Simulate A2A: <span id="sim-status">OFF</span></button>
+  <button id="viz-toggle" title="Show/hide auth flow visualization cards in chat" onclick="toggleViz()">📊 Auth Flow: <span id="viz-status">ON</span></button>
   <button id="settings-btn" title="Opentext SDP connection settings" onclick="openSettings()">⚙</button>
 </header>
 
@@ -485,6 +559,14 @@
       and invoke it with <code style="font-size:10px;color:#9ca3af">@OT ADM Agent</code> from any AgentSpace conversation.
       See <a id="readme-link" href="/readme" target="_blank" rel="noopener noreferrer" style="color:#6366f1;text-decoration:none">README.md</a> for setup steps (rendered markdown view).
     </div>
+    <div class="agentspace-note" style="margin-top:8px;border-color:#065f46">
+      <strong style="color:#6ee7b7">🔐 A2A Bearer Token Passthrough:</strong>
+      The agent card advertises <code style="font-size:10px;color:#9ca3af">securitySchemes: bearer</code> so Gemini/AgentSpace
+      automatically injects <code style="font-size:10px;color:#9ca3af">Authorization: Bearer &lt;token&gt;</code> on every call —
+      the wrapper forwards it directly to the Octane MCP server.
+      For local / demo use the server's configured <code style="font-size:10px;color:#9ca3af">API_KEY</code> is used automatically.
+      Toggle <strong>🤖 Simulate A2A</strong> to replay this flow step-by-step.
+    </div>
   </div>
 </div>
 
@@ -513,6 +595,11 @@
 
   // Stable context ID for the whole browser session — enables multi-turn memory
   const SESSION_CONTEXT_ID = 'ctx-' + Math.random().toString(36).slice(2) + Date.now();
+
+  // Returns headers for POST (JSON body).
+  function authHeaders(includeContentType = true) {
+    return includeContentType ? { 'Content-Type': 'application/json' } : {};
+  }
 
   function autoResize(el) {
     el.style.height = 'auto';
@@ -595,55 +682,6 @@
 </details>`;
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    const text = msgInput.value.trim();
-    if (!text) return;
-
-    msgInput.value = '';
-    msgInput.style.height = 'auto';
-    sendBtn.disabled = true;
-
-    appendMessage('user', text);
-    const loadingEl = appendMessage('agent', 'Thinking…', { loading: true, id: 'loading-msg' });
-
-    try {
-      const payload = {
-        message: {
-          messageId: 'msg-' + (msgCounter++),
-          contextId: SESSION_CONTEXT_ID,
-          role: 'ROLE_USER',
-          parts: [{ text }]
-        },
-        configuration: { blocking: true }
-      };
-
-      const res = await fetch('/message:send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      loadingEl.remove();
-
-      if (!res.ok) {
-        const errText = await res.text();
-        appendMessage('agent', `Error ${res.status}: ${errText}`, { error: true });
-        return;
-      }
-
-      const data = await res.json();
-      renderReply(data);
-
-    } catch (err) {
-      loadingEl.remove();
-      appendMessage('agent', 'Network error: ' + err.message, { error: true });
-    } finally {
-      sendBtn.disabled = false;
-      msgInput.focus();
-    }
-  }
-
   function renderReply(data) {
     // A2A TaskResponse: { task: { status: { message: { parts } }, artifacts: [...] } }
     const task = data.task || data;
@@ -710,7 +748,7 @@
     keyInput.value = '';
     overlay.classList.add('open');
     try {
-      const res = await fetch('/config');
+      const res = await fetch('/config', { headers: authHeaders(false) });
       if (res.ok) {
         const cfg = await res.json();
         document.getElementById('cfg-url').value = cfg.octane_url || '';
@@ -745,7 +783,7 @@
   // Update the header Gemini indicator from the live /config endpoint
   async function refreshStatus() {
     try {
-      const res = await fetch('/config');
+      const res = await fetch('/config', { headers: authHeaders(false) });
       if (!res.ok) return;
       const cfg = await res.json();
       updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set);
@@ -806,7 +844,7 @@
     try {
       const res = await fetch('/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -836,8 +874,369 @@
     if (e.key === 'Escape') closeSettings();
   });
 
+  // ── A2A Simulation ────────────────────────────────────────────
+
+  let simulateA2A = localStorage.getItem('simulate_a2a') === 'true';
+  let showViz = localStorage.getItem('show_viz') !== 'false'; // default ON
+
+  function updateSimToggle() {
+    const btn  = document.getElementById('sim-toggle');
+    const text = document.getElementById('sim-status');
+    if (!btn || !text) return;
+    if (simulateA2A) {
+      btn.classList.add('sim-on');
+      text.textContent = 'ON';
+      btn.title = 'A2A simulation active — each message replays the Gemini auth flow. Click to disable.';
+    } else {
+      btn.classList.remove('sim-on');
+      text.textContent = 'OFF';
+      btn.title = 'Click to simulate the real Gemini A2A authentication flow in the chat.';
+    }
+  }
+
+  function toggleSimulate() {
+    simulateA2A = !simulateA2A;
+    localStorage.setItem('simulate_a2a', simulateA2A);
+    updateSimToggle();
+  }
+
+  function updateVizToggle() {
+    const btn  = document.getElementById('viz-toggle');
+    const text = document.getElementById('viz-status');
+    if (!btn || !text) return;
+    if (showViz) {
+      btn.classList.add('viz-on');
+      text.textContent = 'ON';
+      btn.title = 'Auth flow cards visible — click to hide';
+    } else {
+      btn.classList.remove('viz-on');
+      text.textContent = 'OFF';
+      btn.title = 'Auth flow cards hidden — click to show';
+    }
+  }
+
+  function toggleViz() {
+    showViz = !showViz;
+    localStorage.setItem('show_viz', showViz);
+    updateVizToggle();
+  }
+
+  function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  // Respects showViz — no delays when visualization is hidden
+  function _delay(ms) { return showViz ? _sleep(ms) : Promise.resolve(); }
+
+  // No-op trace stub — returned by trace factories when showViz is OFF
+  function _noopTrace() {
+    return { card: null, setActive() {}, setOk() {}, setErr() {} };
+  }
+
+  // ── Trace card helpers ────────────────────────────────────────
+
+  function _makeTraceHelpers(rows) {
+    return {
+      setActive(id, label) {
+        const r = rows[id]; if (!r) return;
+        r.className = 'step active';
+        r.querySelector('.step-icon').textContent = '›';
+        if (label) r.querySelector('.step-line').textContent = label;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      },
+      setOk(id, label) {
+        const r = rows[id]; if (!r) return;
+        r.className = 'step ok';
+        r.querySelector('.step-icon').textContent = '✓';
+        if (label) r.querySelector('.step-line').textContent = label;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      },
+      setErr(id, label) {
+        const r = rows[id]; if (!r) return;
+        r.className = 'step err';
+        r.querySelector('.step-icon').textContent = '✗';
+        if (label) r.querySelector('.step-line').textContent = label;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      },
+    };
+  }
+
+  // Build the full 7-step sim trace card (Simulate A2A mode)
+  function createTraceCard() {
+    if (!showViz) return _noopTrace();
+
+    const steps = [
+      { id: 's1', label: 'GET /.well-known/agent-card.json' },
+      { id: 's2', label: 'Read securitySchemes from agent card' },
+      { id: 's3', label: 'OAuth: Bearer token obtained (simulated)' },
+      { id: 's4', label: 'Inject Authorization: Bearer header' },
+      { id: 's5', label: 'POST /message:send  →  A2A wrapper' },
+      { id: 's6', label: 'Wrapper extracts token  →  forwards to Octane MCP' },
+      { id: 's7', label: 'Response received' },
+    ];
+
+    if (document.getElementById('empty-state')) document.getElementById('empty-state').remove();
+
+    const card = document.createElement('div');
+    card.className = 'a2a-trace';
+    card.innerHTML = `<div class="trace-title">🤖 Gemini A2A — auth flow simulation</div>`;
+
+    const rows = {};
+    for (const s of steps) {
+      const row = document.createElement('div');
+      row.className = 'step pending';
+      row.innerHTML = `<span class="step-icon">○</span><span class="step-line">${escapeHtml(s.label)}</span>`;
+      card.appendChild(row);
+      rows[s.id] = row;
+    }
+
+    chatWindow.appendChild(card);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return { card, ..._makeTraceHelpers(rows) };
+  }
+
+  // Build a compact 3-step auth trace card (normal / non-sim mode)
+  function createSimpleAuthTrace() {
+    if (!showViz) return _noopTrace();
+
+    if (document.getElementById('empty-state')) document.getElementById('empty-state').remove();
+
+    const card = document.createElement('div');
+    card.className = 'a2a-trace';
+    card.innerHTML = `<div class="trace-title">🔐 A2A Auth — server API_KEY passthrough</div>`;
+
+    const stepDefs = [
+      { id: 'a1', label: `POST /message:send  →  A2A wrapper` },
+      { id: 'a2', label: `Wrapper: using server API_KEY  →  forwarding to Octane MCP…` },
+      { id: 'a3', label: `Response received` },
+    ];
+
+    const rows = {};
+    for (const s of stepDefs) {
+      const row = document.createElement('div');
+      row.className = 'step pending';
+      row.innerHTML = `<span class="step-icon">○</span><span class="step-line">${escapeHtml(s.label)}</span>`;
+      card.appendChild(row);
+      rows[s.id] = row;
+    }
+
+    chatWindow.appendChild(card);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    const helpers = _makeTraceHelpers(rows);
+    helpers.setOk('a1', `POST /message:send  →  A2A wrapper`);
+    helpers.setActive('a2');
+
+    return { card, ...helpers };
+  }
+
+  // Full simulated A2A submit — replaces handleSubmit when sim is ON
+  async function handleSubmitSimulated(text, payload) {
+    const trace = createTraceCard();
+
+    // Step 1 — fetch agent card
+    trace.setActive('s1', 'GET /.well-known/agent-card.json  →  reading security policy…');
+    await _delay(350);
+    let cardData = null;
+    try {
+      const cardRes = await fetch('/.well-known/agent-card.json');
+      cardData = await cardRes.json();
+      trace.setOk('s1', 'GET /.well-known/agent-card.json  ← 200 OK');
+    } catch (e) {
+      trace.setErr('s1', 'GET /.well-known/agent-card.json  ← ERROR: ' + e.message);
+    }
+
+    // Step 2 — parse securitySchemes
+    trace.setActive('s2');
+    await _delay(300);
+    if (cardData?.securitySchemes?.bearer) {
+      const s = cardData.securitySchemes.bearer;
+      trace.setOk('s2', `securitySchemes.bearer → type="${s.type}"  scheme="${s.scheme}"`);
+    } else {
+      trace.setOk('s2', 'securitySchemes: bearer (http/bearer) — token required on all calls');
+    }
+
+    // Step 3 — OAuth: exchange A2A admin key for the real Octane bearer token
+    trace.setActive('s3', 'OAuth 2.0: obtaining Octane bearer token from server…');
+    await _delay(400);
+    let octaneToken = null;
+    try {
+      const simRes = await fetch('/sim/token');
+      if (simRes.ok) {
+        const simData = await simRes.json();
+        octaneToken = simData.token;
+        trace.setOk('s3', `Bearer token obtained  (${octaneToken.length} chars, last 8: …${octaneToken.slice(-8)})`);
+      } else if (simRes.status === 401) {
+        trace.setErr('s3', 'OAuth failed — set your A2A Wrapper Key in ⚙ Settings first');
+        appendMessage('agent',
+          '🔒 Simulation aborted: could not obtain Octane token.\n' +
+          'Set your A2A Wrapper Key (A2A_API_KEY from .env) in ⚙ Settings → Bearer Token.',
+          { error: true });
+        return null;
+      } else {
+        trace.setErr('s3', 'OAuth failed — no API_KEY configured on the server');
+        appendMessage('agent', '🔒 Simulation aborted: server has no API_KEY configured.', { error: true });
+        return null;
+      }
+    } catch (e) {
+      trace.setErr('s3', 'OAuth failed — network error: ' + e.message);
+      return null;
+    }
+
+    const masked = '●●●' + octaneToken.slice(-8);
+
+    // Step 4 — inject header
+    trace.setActive('s4');
+    await _delay(300);
+    trace.setOk('s4', `Authorization: Bearer ${masked}  →  header injected`);
+
+    // Step 5 — actual POST with the real Octane token
+    trace.setActive('s5', `POST /message:send  Authorization: Bearer ${masked}`);
+    await _delay(250);
+
+    let res;
+    try {
+      res = await fetch('/message:send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + octaneToken,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      trace.setErr('s5', 'POST /message:send  ← NETWORK ERROR: ' + e.message);
+      return null;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      if (res.status === 401) {
+        trace.setErr('s5', `POST /message:send  ← 401 Unauthorized`);
+        appendMessage('agent', '🔒 401 Unauthorized — token was rejected by the wrapper.', { error: true });
+      } else {
+        trace.setErr('s5', `POST /message:send  ← HTTP ${res.status}: ${errText.slice(0, 120)}`);
+      }
+      return null;
+    }
+
+    trace.setOk('s5', `POST /message:send  ← 200 OK`);
+
+    // Step 6 — forwarding trace
+    trace.setActive('s6', `Wrapper: extracted Bearer ${masked}  →  forwarding to Octane MCP…`);
+    await _delay(300);
+    const data = await res.json();
+    const authInjected = data?.task?.metadata?.auth_injected === true;
+    const mcpCalled = data?.task?.metadata?.mcp_called === true;
+    if (authInjected && mcpCalled) {
+      trace.setOk('s6', `Octane MCP: Authorization: Bearer ${masked}  →  authenticated`);
+    } else if (authInjected && !mcpCalled) {
+      trace.setOk('s6', `Wrapper: Authorization injected  →  processed locally (no MCP)`);
+    } else if (!authInjected && mcpCalled) {
+      trace.setOk('s6', `Octane MCP: no wrapper token injected  →  forwarded (authentication unknown)`);
+    } else {
+      trace.setOk('s6', `Wrapper: processed locally  →  no MCP call (no token forwarded)`);
+    }
+
+    // Step 7 — response
+    trace.setActive('s7');
+    trace.setOk('s7', 'Response received  ✓');
+
+    return data;
+  }
+
+  // ── handleSubmit — branches on simulateA2A mode ──────────────
+
+  async function handleSubmit(e) {
+    if (e) e.preventDefault();
+    const text = msgInput.value.trim();
+    if (!text) return;
+
+    if (!simulateA2A) {
+      // Original path (with optional auth trace)
+      msgInput.value = '';
+      msgInput.style.height = 'auto';
+      sendBtn.disabled = true;
+      appendMessage('user', text);
+      const trace = createSimpleAuthTrace();
+      const loadingEl = appendMessage('agent', 'Thinking…', { loading: true, id: 'loading-msg' });
+      try {
+        const payload = {
+          message: {
+            messageId: 'msg-' + (msgCounter++),
+            contextId: SESSION_CONTEXT_ID,
+            role: 'ROLE_USER',
+            parts: [{ text }]
+          },
+          configuration: { blocking: true }
+        };
+        const res = await fetch('/message:send', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify(payload)
+        });
+        loadingEl.remove();
+        if (!res.ok) {
+          const errText = await res.text();
+          trace.setErr('a2', `Wrapper: HTTP ${res.status} error`);
+          trace.setErr('a3', `Response: ${res.status}`);
+          appendMessage('agent', `Error ${res.status}: ${errText}`, { error: true });
+          return;
+        }
+        const data = await res.json();
+        const authInjected = data?.task?.metadata?.auth_injected === true;
+        const mcpCalled = data?.task?.metadata?.mcp_called === true;
+        if (authInjected && mcpCalled) {
+          trace.setOk('a2', 'Wrapper: server API_KEY  →  forwarded to Octane MCP  ✓');
+        } else if (authInjected && !mcpCalled) {
+          trace.setOk('a2', 'Wrapper: Authorization injected  →  processed locally (no MCP)');
+        } else if (!authInjected && mcpCalled) {
+          trace.setOk('a2', 'Wrapper: no server API_KEY — forwarded to Octane MCP  ✓');
+        } else {
+          trace.setOk('a2', 'Wrapper: no Authorization injected  →  processed locally');
+        }
+        trace.setOk('a3', 'Response received  ← 200 OK');
+        renderReply(data);
+      } catch (err) {
+        if (document.getElementById('loading-msg')) document.getElementById('loading-msg').remove();
+        trace.setErr('a2', 'Network error: ' + err.message);
+        trace.setErr('a3', 'Response: failed');
+        appendMessage('agent', 'Network error: ' + err.message, { error: true });
+      } finally {
+        sendBtn.disabled = false;
+        msgInput.focus();
+      }
+      return;
+    }
+
+    // ── Simulate A2A path ─────────────────────────────────────
+    msgInput.value = '';
+    msgInput.style.height = 'auto';
+    sendBtn.disabled = true;
+    appendMessage('user', text);
+
+    const payload = {
+      message: {
+        messageId: 'msg-' + (msgCounter++),
+        contextId: SESSION_CONTEXT_ID,
+        role: 'ROLE_USER',
+        parts: [{ text }]
+      },
+      configuration: { blocking: true }
+    };
+
+    try {
+      const data = await handleSubmitSimulated(text, payload);
+      if (data) renderReply(data);
+    } catch (err) {
+      appendMessage('agent', 'Network error: ' + err.message, { error: true });
+    } finally {
+      sendBtn.disabled = false;
+      msgInput.focus();
+    }
+  }
+
   // Initialise status on load and poll periodically
   refreshStatus();
+  updateSimToggle();
+  updateVizToggle();
   setInterval(refreshStatus, 60000); // refresh every 60s
 </script>
 </body>

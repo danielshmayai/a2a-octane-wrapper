@@ -301,13 +301,15 @@ async def execute_tool(
     tool_name: str,
     arguments: dict[str, Any],
     mcp: OctaneMcpClient,
+    *,
+    bearer_token: str | None = None,
 ) -> Artifact:
     """
     Call the Opentext SDP MCP server and wrap the result in an A2A Artifact.
     """
     logger.info("Routing tool=%s  args=%s", tool_name, arguments)
 
-    result = await mcp.call_tool(tool_name, arguments)
+    result = await mcp.call_tool(tool_name, arguments, bearer_token=bearer_token)
 
     # The MCP result typically has a "content" list of {type, text} items
     content_items = result.get("content", [])

@@ -344,6 +344,19 @@ curl -X POST http://localhost:9000/message:send \
 
 The `contextId` field is your **session ID** — reuse it across requests to maintain conversation history.
 
+#### Task metadata (new)
+
+Responses now include explicit metadata on the returned `task` object describing
+how the wrapper handled authentication and MCP forwarding. Check `task.metadata`:
+
+- `mcp_called` (boolean): true if the wrapper forwarded the request to the
+  Octane MCP server (one or more MCP tool calls were executed).
+- `auth_injected` (boolean): true if the wrapper injected or substituted a
+  bearer token (server API key or simulated token) into the request.
+
+The built-in Chat UI uses these flags to render the auth/forwarding visualization
+accurately (it no longer guesses from artifact counts).
+
 ---
 
 <a id="7-supported-tools"></a>
@@ -595,6 +608,39 @@ Gemini Enterprise forwards the message to your wrapper's `/message:send` endpoin
 > **Multi-turn context:** Gemini Enterprise passes the conversation thread ID as `contextId`, so follow-up questions within the same thread retain full history — exactly like the built-in chat UI.
 
 ---
+
+## CI & Test Reports
+
+This project includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs the test suite on push and pull requests.
+
+What the workflow does:
+
+- Installs project dependencies from `requirements.txt`.
+- Runs `pytest`, producing `reports/junit.xml` and a self-contained HTML report at `reports/report.html`.
+- Uploads the `reports/` directory as a workflow artifact named `test-reports`.
+
+How to view CI reports on GitHub:
+
+1. Push your branch to GitHub.
+2. Open the repository's **Actions** tab and select the latest CI run.
+3. After the run finishes, expand the **Artifacts** section and download `test-reports` — it contains `junit.xml` and `report.html`.
+
+Run the same commands locally to reproduce the CI behavior:
+
+```bash
+# activate venv, install deps
+pip install -r requirements.txt
+
+# run tests and generate reports
+mkdir -p reports
+pytest --junitxml=reports/junit.xml --html=reports/report.html --self-contained-html -q
+
+# open the HTML report in your browser
+python -m webbrowser reports/report.html
+```
+
+If you'd like a pre-commit hook that runs tests before committing, I can add a simple `pre-commit` configuration that runs `pytest` (recommended for small teams). Ask and I will add it.
+
 
 ### Networking & prerequisites checklist
 

@@ -28,6 +28,8 @@ GEMINI_ENABLED: bool = True   # toggled at runtime via /config
 A2A_HOST: str = os.getenv("A2A_HOST", "0.0.0.0")
 A2A_PORT: int = int(os.getenv("A2A_PORT", "9000"))
 AGENT_VERSION: str = "0.1.0"
+# Inbound bearer token — leave empty to disable auth (dev/local use only)
+A2A_API_KEY: str = os.getenv("A2A_API_KEY", "")
 
 # --- MCP discovery polling (seconds). Set to 0 to disable periodic polling.
 # Default: once per day (86400 seconds). Set env var to override.

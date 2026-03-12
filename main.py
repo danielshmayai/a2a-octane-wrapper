@@ -23,9 +23,10 @@ import asyncio
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -56,6 +57,32 @@ from tool_router import (
     populate_registry_from_mcp,
     resolve_intent,
 )
+
+# ── Auth ─────────────────────────────────────────────────────────────
+
+_bearer = HTTPBearer(auto_error=False)
+
+def _verify_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    """Validate inbound Bearer token for admin endpoints when A2A_API_KEY is configured."""
+    if not config.A2A_API_KEY:
+        return  # auth disabled — A2A_API_KEY not set
+    if credentials is None or credentials.credentials != config.A2A_API_KEY:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+def _extract_bearer_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> str:
+    """Extract the Bearer token from the inbound request (optional).
+
+    When Gemini/AgentSpace calls this A2A endpoint it injects
+    Authorization: Bearer <TOKEN> which is passed through to Octane.
+    For Chat UI / demo use without an explicit token the server falls back
+    to config.API_KEY, so the header is not required.
+    """
+    return credentials.credentials if credentials else ""
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -156,7 +183,7 @@ def _masked_key(key: str) -> str:
     return ("*" * max(len(key) - 4, 0)) + key[-4:]
 
 
-@app.get("/config")
+@app.get("/config", dependencies=[Depends(_verify_token)])
 async def get_config():
     """Return the current runtime configuration (API key is masked)."""
     return JSONResponse({
@@ -170,7 +197,7 @@ async def get_config():
     })
 
 
-@app.post("/config")
+@app.post("/config", dependencies=[Depends(_verify_token)])
 async def update_config(body: ConfigUpdate):
     """Update Opentext SDP URL and/or API key at runtime and reinitialise the MCP client."""
     global mcp, agent
@@ -269,17 +296,31 @@ def _build_agent_card(base_url: str) -> AgentCard:
         ),
         capabilities=AgentCapabilities(streaming=False, pushNotifications=False),
         securitySchemes={
-            "bearer": SecurityScheme(
-                httpAuthSecurityScheme={"scheme": "Bearer"}
-            )
+            "bearer": SecurityScheme(type="http", scheme="bearer")
         },
+        security=[{"bearer": []}],
         defaultInputModes=["text/plain", "application/json"],
         defaultOutputModes=["application/json", "text/plain"],
         skills=skills,
     )
 
 
-@app.post("/discover-tools")
+@app.get("/sim/token", dependencies=[Depends(_verify_token)])
+async def sim_token():
+    """Return the configured Octane API key for UI simulation use.
+
+    The UI exchanges its A2A_API_KEY (admin key) for the real Octane bearer token
+    so the simulation can demonstrate the full passthrough flow without requiring
+    the user to manually copy-paste the long Octane API_KEY into the browser.
+
+    Protected by A2A_API_KEY — for PoC/demo use only.
+    """
+    if not config.API_KEY:
+        raise HTTPException(status_code=404, detail="No API_KEY configured on the server")
+    return JSONResponse({"token": config.API_KEY})
+
+
+@app.post("/discover-tools", dependencies=[Depends(_verify_token)])
 async def discover_tools():
     """Manual trigger to discover MCP tools and refresh the router/agent.
 
@@ -375,9 +416,15 @@ async def readme():
 # ── A2A SendMessage ─────────────────────────────────────────────────
 
 @app.post("/message:send")
-async def send_message(req: SendMessageRequest):
+async def send_message(
+    req: SendMessageRequest,
+    bearer_token: str = Depends(_extract_bearer_token),
+):
     """
     Primary A2A endpoint.
+
+    Gemini injects Authorization: Bearer <TOKEN> which is extracted and
+    forwarded to the Octane MCP server on every downstream call.
 
     When GEMINI_API_KEY is configured the request is handled by the
     Gemini function-calling agent (real agentic loop).
@@ -389,17 +436,33 @@ async def send_message(req: SendMessageRequest):
     user_text = " ".join(p.text for p in user_msg.parts if p.text) or ""
     logger.info("A2A request  context=%s  text=%r", context_id, user_text)
 
+    # Resolve which token to forward to the Octane MCP server:
+    #   - No A2A_API_KEY configured → no way to distinguish admin from real tokens;
+    #     always use the server's configured API_KEY (covers Chat UI / demo use).
+    #   - A2A_API_KEY configured and bearer matches it → Chat UI / demo mode;
+    #     substitute with server's API_KEY.
+    #   - A2A_API_KEY configured and bearer doesn't match → real Gemini OAuth token;
+    #     pass through as-is.
+    octane_token = bearer_token
+    if config.API_KEY:
+        if not config.A2A_API_KEY:
+            octane_token = config.API_KEY
+            logger.info("No A2A_API_KEY set — using server API_KEY for Octane downstream call")
+        elif bearer_token == config.A2A_API_KEY:
+            octane_token = config.API_KEY
+            logger.info("Admin key detected — substituting server API_KEY for Octane downstream call")
+
     if agent is not None:
-        return await _handle_with_agent(task_id, context_id, user_text)
-    return await _handle_with_keywords(task_id, context_id, user_text, user_msg)
+        return await _handle_with_agent(task_id, context_id, user_text, octane_token)
+    return await _handle_with_keywords(task_id, context_id, user_text, user_msg, octane_token)
 
 
 async def _handle_with_agent(
-    task_id: str, context_id: str, user_text: str
+    task_id: str, context_id: str, user_text: str, bearer_token: str
 ) -> dict:
     """Run the Gemini agentic loop and wrap the result as an A2A Task."""
     try:
-        summary, artifacts = await agent.run(user_text, mcp, context_id)
+        summary, artifacts, mcp_called = await agent.run(user_text, mcp, context_id, bearer_token)
     except Exception as exc:
         logger.exception("Gemini agent error")
         return _error_task(
@@ -417,13 +480,14 @@ async def _handle_with_agent(
             ),
         ),
         artifacts=artifacts if artifacts else None,
+        metadata={"mcp_called": mcp_called, "auth_injected": bearer_token is not None},
     )
-    logger.info("Agent response  task=%s  artifacts=%d", task.id, len(artifacts or []))
+    logger.info("Agent response  task=%s  artifacts=%d  mcp_called=%s  auth_injected=%s", task.id, len(artifacts or []), mcp_called, bearer_token is not None)
     return TaskResponse(task=task).model_dump(exclude_none=True)
 
 
 async def _handle_with_keywords(
-    task_id: str, context_id: str, user_text: str, user_msg
+    task_id: str, context_id: str, user_text: str, user_msg, bearer_token: str
 ) -> dict:
     """Legacy keyword-based routing fallback (no Gemini API key required)."""
     tool_name = resolve_intent(user_text)
@@ -452,7 +516,7 @@ async def _handle_with_keywords(
         )
 
     try:
-        artifact = await execute_tool(tool_name, arguments, mcp)
+        artifact = await execute_tool(tool_name, arguments, mcp, bearer_token=bearer_token)
     except OctaneMcpError as exc:
         logger.error("Opentext SDP MCP error: %s", exc)
         return _error_task(
@@ -493,6 +557,7 @@ async def _handle_with_keywords(
             ),
         ),
         artifacts=[artifact],
+        metadata={"mcp_called": True, "auth_injected": bearer_token is not None},
     )
     logger.info("Keyword response  task=%s  state=%s", task.id, task.status.state)
     return TaskResponse(task=task).model_dump(exclude_none=True)

@@ -126,8 +126,9 @@ class AgentProvider(BaseModel):
 
 
 class SecurityScheme(BaseModel):
-    """Simplified – PoC uses Bearer token only."""
-    httpAuthSecurityScheme: dict[str, str] | None = None
+    """OpenAPI 3.0-style security scheme.  type='http', scheme='bearer' for JWT pass-through."""
+    type: str
+    scheme: str
 
 
 class AgentInterface(BaseModel):
@@ -144,6 +145,7 @@ class AgentCard(BaseModel):
     provider: AgentProvider | None = None
     capabilities: AgentCapabilities = AgentCapabilities()
     securitySchemes: dict[str, SecurityScheme] | None = None
+    security: list[dict[str, list]] | None = None
     defaultInputModes: list[str] = ["text/plain", "application/json"]
     defaultOutputModes: list[str] = ["application/json", "text/plain"]
     skills: list[AgentSkill] = []

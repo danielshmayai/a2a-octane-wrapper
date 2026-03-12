@@ -51,6 +51,10 @@ Guidelines:
   or similar, compose a reasonable, professional-sounding comment related to
   the work item context (name, phase, type, etc.) and use it directly.
   Do NOT refuse or ask for clarification — just draft and post the comment.
+- When the user asks for a joke, something funny, something not serious, or
+  wants to lighten the mood — call the tell_joke tool immediately. Pass a
+  relevant topic if context is available (e.g. the entity type or recent task).
+  Present the joke exactly as returned by the tool, without modifications.
 """.strip()
 _GENERATE_TEXT_TRIGGERS = re.compile(
     r"\b(invent|make\s+up|make\s+something|anything|something\s+funny|something\s+clever|"
@@ -67,20 +71,25 @@ _GENERATE_TEXT_TRIGGERS = re.compile(
 # the runner can call them directly without extra wiring.
 # sharedSpaceId / workSpaceId are injected by the MCP client automatically.
 
-def _build_tools(mcp: OctaneMcpClient, artifacts: list[Artifact]) -> list:
+def _build_tools(
+    mcp: OctaneMcpClient,
+    artifacts: list[Artifact],
+    bearer_token: str | None = None,
+    mcp_called_flag: list[bool] | None = None,
+) -> list:
     """Return a list of typed async functions, one per Opentext SDP MCP tool."""
 
     async def get_defect(entityId: int) -> str:
         """Retrieve a defect from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_defect", {"entityId": entityId}, mcp, artifacts)
+        return await _invoke("get_defect", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
 
     async def get_story(entityId: int) -> str:
         """Retrieve a user story from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_story", {"entityId": entityId}, mcp, artifacts)
+        return await _invoke("get_story", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
 
     async def get_feature(entityId: int) -> str:
         """Retrieve a feature from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_feature", {"entityId": entityId}, mcp, artifacts)
+        return await _invoke("get_feature", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
 
     async def get_comments(entityId: int, entityType: str) -> str:
         """Retrieve all comments for an entity (defect, story, or feature).
@@ -88,7 +97,7 @@ def _build_tools(mcp: OctaneMcpClient, artifacts: list[Artifact]) -> list:
         """
         return await _invoke(
             "get_comments", {"entityId": entityId, "entityType": entityType},
-            mcp, artifacts,
+            mcp, artifacts, bearer_token, mcp_called_flag,
         )
 
     async def create_comment(entityId: int, entityType: str, text: str) -> str:
@@ -98,7 +107,7 @@ def _build_tools(mcp: OctaneMcpClient, artifacts: list[Artifact]) -> list:
         return await _invoke(
             "create_comment",
             {"entityId": entityId, "entityType": entityType, "text": text},
-            mcp, artifacts,
+            mcp, artifacts, bearer_token, mcp_called_flag,
         )
 
     async def update_comment(
@@ -111,16 +120,27 @@ def _build_tools(mcp: OctaneMcpClient, artifacts: list[Artifact]) -> list:
             "update_comment",
             {"commentId": commentId, "entityId": entityId,
              "entityType": entityType, "text": text},
-            mcp, artifacts,
+            mcp, artifacts, bearer_token, mcp_called_flag,
         )
 
     async def fetch_My_Work_Items() -> str:
         """Fetch the current user's assigned work items (defects, stories, tasks)."""
-        return await _invoke("fetch_My_Work_Items", {}, mcp, artifacts)
+        return await _invoke("fetch_My_Work_Items", {}, mcp, artifacts, bearer_token, mcp_called_flag)
+
+    async def tell_joke(topic: str = "") -> str:
+        """Tell a funny, light-hearted joke.
+        Use this tool whenever the user asks for a joke, something funny,
+        something not serious, or wants to lighten the mood.
+        The optional topic parameter can hint at what the joke should be about
+        (e.g. 'software bugs', 'defects', 'the user's work items').
+        This tool does NOT call the MCP server — it generates the joke locally.
+        """
+        return await _generate_joke(topic)
 
     return [
         get_defect, get_story, get_feature, get_comments,
         create_comment, update_comment, fetch_My_Work_Items,
+        tell_joke,
     ]
 
 
@@ -129,11 +149,15 @@ async def _invoke(
     arguments: dict[str, Any],
     mcp: OctaneMcpClient,
     artifacts: list[Artifact],
+    bearer_token: str | None = None,
+    mcp_called_flag: list[bool] | None = None,
 ) -> str:
     """Execute one MCP tool call, append its artifact, return text for Gemini."""
     try:
-        artifact = await execute_tool(tool_name, arguments, mcp)
+        artifact = await execute_tool(tool_name, arguments, mcp, bearer_token=bearer_token)
         artifacts.append(artifact)
+        if mcp_called_flag is not None:
+            mcp_called_flag[0] = True
         texts = [p.text for p in artifact.parts if p.text]
         raw   = [str(p.data) for p in artifact.parts if p.data and not p.text]
         return "\n".join(texts + raw) or str(artifact)
@@ -168,14 +192,15 @@ class GeminiAgent:
         self._session_service = InMemorySessionService()
         self._runner: Runner | None = None
         self._current_mcp: OctaneMcpClient | None = None
-        # Shared artifact list — closures hold a reference to this list object.
-        # Use .clear() in run(), never reassign, so closures always see the same list.
+        # Shared artifact list and MCP-called flag — closures hold references to
+        # these objects. Use .clear() / [0]=False in run(), never reassign.
         self._run_artifacts: list[Artifact] = []
+        self._run_mcp_called: list[bool] = [False]
         logger.info("GeminiAgent (ADK) ready  model=%s", config.GEMINI_MODEL)
 
-    def _rebuild_runner(self, mcp: OctaneMcpClient) -> None:
+    def _rebuild_runner(self, mcp: OctaneMcpClient, bearer_token: str | None = None) -> None:
         """Construct a fresh LlmAgent + Runner bound to *mcp*."""
-        tools = _build_tools(mcp, self._run_artifacts)
+        tools = _build_tools(mcp, self._run_artifacts, bearer_token, self._run_mcp_called)
         agent = LlmAgent(
             name="ot_adm_agent",
             model=config.GEMINI_MODEL,
@@ -199,22 +224,25 @@ class GeminiAgent:
         if the Opentext SDP server is unreachable at startup.
         """
         self._rebuild_runner(mcp)
+        # Always derive the full tool list from _build_tools so that local-only
+        # tools (e.g. tell_joke) are never dropped from the reported list.
+        all_names = [fn.__name__ for fn in _build_tools(mcp, [])]
         try:
             raw = await mcp.list_tools()
-            names = [t["name"] for t in raw.get("tools", [])]
+            mcp_names = [t["name"] for t in raw.get("tools", [])]
             logger.info(
-                "GeminiAgent (ADK): %d MCP tools confirmed: %s", len(names), names
+                "GeminiAgent (ADK): %d MCP tools confirmed: %s", len(mcp_names), mcp_names
             )
-            return names
         except Exception as exc:
             logger.warning("Tool discovery failed (agent still operational): %s", exc)
-            return [fn.__name__ for fn in _build_tools(mcp, [])]
+        return all_names
 
     async def run(
         self,
         user_text: str,
         mcp: OctaneMcpClient,
         context_id: str = "",
+        bearer_token: str | None = None,
     ) -> tuple[str, list[Artifact]]:
         """
         Run one full agentic turn for the given user message.
@@ -226,12 +254,14 @@ class GeminiAgent:
             summary   – Gemini's final natural-language answer.
             artifacts – Raw Opentext SDP data collected during this turn.
         """
-        if self._runner is None or mcp is not self._current_mcp:
-            await self.refresh_tools(mcp)
+        # Rebuild the runner each turn so tool closures capture the current bearer_token.
+        self._rebuild_runner(mcp, bearer_token)
+        self._current_mcp = mcp
 
-        # Reset per-run artifact list (.clear() keeps the same list object so
-        # the tool closures built in _rebuild_runner still point to it).
+        # Reset per-run state (.clear() / [0]=False keeps the same list objects
+        # so the tool closures built in _rebuild_runner still point to them).
         self._run_artifacts.clear()
+        self._run_mcp_called[0] = False
 
         user_text = await self._maybe_inject_generated_text(user_text)
         message = types.Content(role="user", parts=[types.Part(text=user_text)])
@@ -252,7 +282,7 @@ class GeminiAgent:
                     )
                 break
 
-        return summary or "(no response from model)", list(self._run_artifacts)
+        return summary or "(no response from model)", list(self._run_artifacts), self._run_mcp_called[0]
 
     async def _maybe_inject_generated_text(self, user_text: str) -> str:
         """
@@ -292,6 +322,41 @@ class GeminiAgent:
 
 
 # ── Private helpers ──────────────────────────────────────────────────
+
+async def _generate_joke(topic: str = "") -> str:
+    """Generate a contextual joke via a direct Gemini call (no MCP involved)."""
+    topic_hint = f" The joke should be related to: {topic}." if topic else ""
+    prompt = (
+        "You are a witty software engineer with a great sense of humour. "
+        "Tell a single short joke (2–4 lines max) that would make a developer laugh.%s "
+        "After the joke, add exactly this line on its own: "
+        "'— 🤖 My personal agent joke. No MCP servers were harmed in the making of this joke.'"
+        % topic_hint
+    )
+    try:
+        client = genai.Client(api_key=config.GEMINI_API_KEY)
+
+        def _sync():
+            return client.models.generate_content(
+                model=config.GEMINI_MODEL,
+                contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+                config=types.GenerateContentConfig(),
+            )
+
+        result = await asyncio.to_thread(_sync)
+        joke = _extract_text(result).strip()
+        if joke and "(no response" not in joke:
+            logger.info("Generated joke (topic=%r)", topic)
+            return joke
+    except Exception as exc:
+        logger.warning("Failed to generate joke: %s", exc)
+
+    return (
+        "Why do programmers prefer dark mode?\n"
+        "Because light attracts bugs! 🐛\n\n"
+        "— 🤖 My personal agent joke. No MCP servers were harmed in the making of this joke."
+    )
+
 
 def _extract_text(response: Any) -> str:
     """Extract all plain-text parts from a google-genai GenerateContentResponse."""

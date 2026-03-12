@@ -239,6 +239,23 @@ Recent refactor (migration to official SDKs):
 These changes improve compatibility with upstream SDKs, reduce custom
 serialization code, and make the agent easier to reason about and test.
 
+### Auth / MCP metadata and UI
+
+The wrapper now sets explicit metadata on A2A `Task` responses to make the
+client-side visualization deterministic and unambiguous:
+
+- `task.metadata.mcp_called` — boolean set to `true` when the wrapper executed
+   one or more MCP tool calls against the Opentext SDP server for this request.
+- `task.metadata.auth_injected` — boolean set to `true` when the wrapper
+   injected or substituted a bearer token (server API key or simulated token)
+   for downstream calls.
+
+The built-in chat UI reads these flags to decide how to render the auth trace
+(token obtained/injected vs token forwarded to MCP). Previously the UI inferred
+MCP activity by checking for artifacts in the response; that heuristic could be
+misleading when local-only tools (for example `tell_joke`) produced output.
+Using explicit metadata fixes that ambiguity.
+
 ### Network Requirements
 
 AgentSpace is a cloud service — your wrapper **must be reachable via public HTTPS**:

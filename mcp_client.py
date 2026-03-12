@@ -72,6 +72,7 @@ class OctaneMcpClient:
         tool_name: str,
         arguments: dict[str, Any],
         *,
+        bearer_token: str | None = None,
         shared_space_id: int | None = None,
         workspace_id: int | None = None,
     ) -> dict:
@@ -88,8 +89,12 @@ class OctaneMcpClient:
 
         logger.info("MCP >>> call_tool=%s  url=%s  args=%s", tool_name, self._url, arguments)
 
+        headers = dict(self._headers)
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
         async with streamablehttp_client(
-            self._url, headers=self._headers, timeout=self._timeout
+            self._url, headers=headers, timeout=self._timeout
         ) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -112,12 +117,16 @@ class OctaneMcpClient:
             ]
         }
 
-    async def list_tools(self) -> dict:
+    async def list_tools(self, *, bearer_token: str | None = None) -> dict:
         """Return the list of tools the Opentext SDP MCP server exposes."""
         logger.info("MCP >>> list_tools  url=%s", self._url)
 
+        headers = dict(self._headers)
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
         async with streamablehttp_client(
-            self._url, headers=self._headers, timeout=self._timeout
+            self._url, headers=headers, timeout=self._timeout
         ) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
