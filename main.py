@@ -23,7 +23,7 @@ import asyncio
 
 import httpx
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -34,11 +34,13 @@ from pydantic import BaseModel
 from a2a_models import (
     AgentCard,
     AgentCapabilities,
-    AgentInterface,
     AgentProvider,
     AgentSkill,
     Artifact,
+    AuthorizationCodeFlow,
+    ClientCredentialsFlow,
     Message,
+    OAuthFlows,
     Part,
     Role,
     SecurityScheme,
@@ -263,7 +265,7 @@ async def update_config(body: ConfigUpdate):
 
 # ── Agent Card (discovery) ───────────────────────────────────────────
 
-def _build_agent_card(base_url: str) -> AgentCard:
+def _build_agent_card() -> AgentCard:
     """Construct the AgentCard from the tool registry and config."""
     skills = [
         AgentSkill(
@@ -276,31 +278,51 @@ def _build_agent_card(base_url: str) -> AgentCard:
         for tool_name, tool_def in TOOL_REGISTRY.items()
     ]
 
+    _oauth_scopes = {
+        "otds:groups": "Access to groups",
+        "otds:roles": "Access to roles",
+        "search": "Access to search",
+    }
+
     return AgentCard(
-        name="OT ADM Agent",
+        name=config.AGENT_NAME,
         description=(
-            "An agent that provides read access to Opentext SDP data "
-            "(defects, user stories, features) via the Opentext SDP MCP Server."
+            "Query and manage Opentext SDP work items — defects, stories, features, "
+            "comments, and personal work lists — using natural language. "
+            "Powered by a Gemini function-calling agent. "
+            "Invoke with @OT ADM Agent in Google AgentSpace."
         ),
         version=config.AGENT_VERSION,
-        supportedInterfaces=[
-            AgentInterface(
-                url=f"{base_url}/message:send",
-                protocolBinding="HTTP+JSON",
-                protocolVersion="1.0",
-            )
-        ],
+        url=config.AGENT_URL,
+        preferredTransport="JSONRPC",
+        protocolVersion="0.3.0",
+        supportsAuthenticatedExtendedCard=True,
         provider=AgentProvider(
             organization="OpenText",
-            url="https://www.opentext.com",
+            url="https://opentext.com",
         ),
-        capabilities=AgentCapabilities(streaming=False, pushNotifications=False),
+        capabilities=AgentCapabilities(streaming=True),
         securitySchemes={
-            "bearer": SecurityScheme(type="http", scheme="bearer")
+            "csai_oauth": SecurityScheme(
+                type="oauth2",
+                flows=OAuthFlows(
+                    clientCredentials=ClientCredentialsFlow(
+                        tokenUrl=config.OAUTH2_TOKEN_URL,
+                        scopes=_oauth_scopes,
+                    ),
+                    authorizationCode=AuthorizationCodeFlow(
+                        authorizationUrl=config.OAUTH2_AUTH_URL,
+                        tokenUrl=config.OAUTH2_TOKEN_URL,
+                        scopes=_oauth_scopes,
+                        pkce=True,
+                        pkceMethod="S256",
+                    ),
+                ),
+            )
         },
-        security=[{"bearer": []}],
-        defaultInputModes=["text/plain", "application/json"],
-        defaultOutputModes=["application/json", "text/plain"],
+        security=[{"csai_oauth": ["otds:groups", "otds:roles", "search"]}],
+        defaultInputModes=["text/plain"],
+        defaultOutputModes=["text/plain"],
         skills=skills,
     )
 
@@ -341,13 +363,12 @@ async def discover_tools():
 
 
 @app.get("/.well-known/agent-card.json")
-async def agent_card(request: Request):
+async def agent_card():
     """
     AgentCard discovery endpoint.
     Gemini / AgentSpace GETs this to learn what the agent can do.
     """
-    base_url = str(request.base_url).rstrip("/")
-    card = _build_agent_card(base_url)
+    card = _build_agent_card()
     return JSONResponse(
         content=card.model_dump(exclude_none=True),
         media_type="application/json",

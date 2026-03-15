@@ -31,6 +31,18 @@ AGENT_VERSION: str = "0.1.0"
 # Inbound bearer token — leave empty to disable auth (dev/local use only)
 A2A_API_KEY: str = os.getenv("A2A_API_KEY", "")
 
+# --- Agent Identity & OAuth2 ---
+# Public URL of this agent (used in the AgentCard)
+AGENT_URL: str = os.getenv("AGENT_URL", "https://csai-a2a-agent.dev.ca.opentext.com")
+AGENT_NAME: str = os.getenv("AGENT_NAME", "CSAI Agent")
+# OTDS OAuth2 endpoints
+OAUTH2_AUTH_URL: str = os.getenv(
+    "OAUTH2_AUTH_URL", "https://otdsauth.dev.ca.opentext.com/oauth2/auth"
+)
+OAUTH2_TOKEN_URL: str = os.getenv(
+    "OAUTH2_TOKEN_URL", "https://otdsauth.dev.ca.opentext.com/oauth2/token"
+)
+
 # --- MCP discovery polling (seconds). Set to 0 to disable periodic polling.
 # Default: once per day (86400 seconds). Set env var to override.
 MCP_TOOL_POLL_INTERVAL_SECONDS: int = int(os.getenv("MCP_TOOL_POLL_INTERVAL_SECONDS", "86400"))

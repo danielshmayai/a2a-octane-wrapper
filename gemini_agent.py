@@ -45,6 +45,14 @@ Guidelines:
   user could try instead.
 - For "my work items", list each item with its type, ID, name, and phase.
 - When creating or updating comments, confirm what was done.
+- You maintain conversation context across turns. When the user refers to
+  "next", "previous", "the same", "that", "it", or similar, resolve the
+  entity from prior conversation history:
+    • "next defect/story/feature" → last fetched ID of that entity type + 1
+    • "previous defect/story/feature" → last fetched ID of that entity type - 1
+    • "same one" / "that" / "it" → repeat the last fetched entity type and ID
+  Always prefer to act on this inference rather than asking the user to
+  repeat the ID. Only ask if the entity type or ID cannot be determined at all.
 - You are fully authorised to compose, draft, or invent comment text for
     Opentext SDP work items when the user asks you to. This is a core part of your job.
   If the user says "invent something", "make something up", "put anything",
@@ -211,7 +219,6 @@ class GeminiAgent:
             app_name="ot_adm_agent",
             agent=agent,
             session_service=self._session_service,
-            auto_create_session=True,
         )
         self._current_mcp = mcp
 
@@ -267,6 +274,16 @@ class GeminiAgent:
         message = types.Content(role="user", parts=[types.Part(text=user_text)])
         session_id = context_id or "default"
         summary = ""
+
+        # Ensure the session exists — newer ADK versions removed auto_create_session
+        # from Runner, so we create it explicitly if it doesn't exist yet.
+        existing = await self._session_service.get_session(
+            app_name="ot_adm_agent", user_id="a2a_user", session_id=session_id
+        )
+        if existing is None:
+            await self._session_service.create_session(
+                app_name="ot_adm_agent", user_id="a2a_user", session_id=session_id
+            )
 
         async for event in self._runner.run_async(
             user_id="a2a_user",

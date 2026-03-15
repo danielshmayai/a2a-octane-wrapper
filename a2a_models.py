@@ -125,10 +125,36 @@ class AgentProvider(BaseModel):
     url: str | None = None
 
 
+class ClientCredentialsFlow(BaseModel):
+    """OAuth2 client credentials flow."""
+    tokenUrl: str
+    scopes: dict[str, str] = {}
+
+
+class AuthorizationCodeFlow(BaseModel):
+    """OAuth2 authorization code flow (with optional PKCE)."""
+    authorizationUrl: str
+    tokenUrl: str
+    scopes: dict[str, str] = {}
+    pkce: bool | None = None
+    pkceMethod: str | None = None
+
+
+class OAuthFlows(BaseModel):
+    """Container for OAuth2 flows."""
+    clientCredentials: ClientCredentialsFlow | None = None
+    authorizationCode: AuthorizationCodeFlow | None = None
+
+
 class SecurityScheme(BaseModel):
-    """OpenAPI 3.0-style security scheme.  type='http', scheme='bearer' for JWT pass-through."""
+    """OpenAPI 3.0-style security scheme.
+
+    For Bearer (HTTP): set type='http', scheme='bearer'.
+    For OAuth2: set type='oauth2' and populate flows.
+    """
     type: str
-    scheme: str
+    scheme: str | None = None   # only for type='http'
+    flows: OAuthFlows | None = None  # only for type='oauth2'
 
 
 class AgentInterface(BaseModel):
@@ -141,11 +167,17 @@ class AgentCard(BaseModel):
     name: str
     description: str
     version: str
-    supportedInterfaces: list[AgentInterface]
+    # A2A 0.3.0 top-level URL and transport fields
+    url: str | None = None
+    preferredTransport: str | None = None
+    protocolVersion: str | None = None
+    supportsAuthenticatedExtendedCard: bool | None = None
+    # Legacy interface list (A2A < 0.3.0)
+    supportedInterfaces: list[AgentInterface] | None = None
     provider: AgentProvider | None = None
     capabilities: AgentCapabilities = AgentCapabilities()
     securitySchemes: dict[str, SecurityScheme] | None = None
     security: list[dict[str, list]] | None = None
-    defaultInputModes: list[str] = ["text/plain", "application/json"]
-    defaultOutputModes: list[str] = ["application/json", "text/plain"]
+    defaultInputModes: list[str] = ["text/plain"]
+    defaultOutputModes: list[str] = ["text/plain"]
     skills: list[AgentSkill] = []
