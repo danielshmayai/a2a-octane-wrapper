@@ -19,10 +19,6 @@ Windows (PowerShell):
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-Note: the AgentCard now advertises local-only helper skills (for example
-`tell_joke`) and exposes an OAuth2 flow named `adm_oauth` (authorization code
-with PKCE + client credentials token URL). Use the JSON returned above when
-registering the agent with Gemini Enterprise.
 ```
 
 macOS / Linux:
@@ -74,6 +70,29 @@ python -m uvicorn main:app --host 0.0.0.0 --port 9000
 ```bash
 curl http://localhost:9000/health
 curl http://localhost:9000/.well-known/agent-card.json
+```
+
+Note: the AgentCard now advertises local-only helper skills (for example
+`tell_joke`) and exposes an OAuth2 flow named `adm_oauth` (authorization code
+with PKCE + client credentials token URL). Use the JSON returned above when
+registering the agent with Gemini Enterprise.
+
+Configuration reminders for A2A auth:
+
+- `AGENT_URL` should be your agent's public base URL (no path). The AgentCard
+	`url` field is built from this value and is included in the JSON you paste
+	into the Gemini Enterprise console.
+- Set `OAUTH2_AUTH_URL` and `OAUTH2_TOKEN_URL` in `.env` to point at your
+	identity provider (OTDS, Keycloak, etc.). These values are embedded into the
+	AgentCard so clients know where to perform Authorization Code and token
+	exchange flows.
+
+Example `.env` snippet:
+
+```env
+AGENT_URL=https://your-public-host.example.com
+OAUTH2_AUTH_URL=https://otdsauth.dev.ca.opentext.com/oauth2/auth
+OAUTH2_TOKEN_URL=https://otdsauth.dev.ca.opentext.com/oauth2/token
 ```
 
 7. Try the built-in chat UI in a browser:

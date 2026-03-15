@@ -503,6 +503,29 @@ cloudflared tunnel --url http://localhost:9000
 
 ---
 
+### A2A Authentication & AgentCard (new)
+
+The AgentCard advertises how clients should authenticate when invoking your agent. Recent changes introduce an OAuth2 security scheme named `adm_oauth` that exposes two flows:
+
+- **Authorization Code (with PKCE):** used by interactive clients (e.g. Gemini Enterprise) to obtain a user-scoped access token. The AgentCard contains `authorizationUrl` and `tokenUrl` values derived from `OAUTH2_AUTH_URL` and `OAUTH2_TOKEN_URL` in your environment.
+- **Client Credentials:** used by non-interactive clients to obtain a machine token when appropriate.
+
+What to set in your `.env` for these values (example):
+
+```env
+# Public URL of this agent (AgentCard `url`)
+AGENT_URL=https://your-public-host.example.com
+
+# OAuth2 endpoints for your identity provider (OTDS or Keycloak, etc.)
+OAUTH2_AUTH_URL=https://otdsauth.dev.ca.opentext.com/oauth2/auth
+OAUTH2_TOKEN_URL=https://otdsauth.dev.ca.opentext.com/oauth2/token
+```
+
+Notes:
+- When registering the agent with Gemini Enterprise, paste the full AgentCard JSON (fetched from `GET /.well-known/agent-card.json`) into the Cloud Console. The JSON includes `securitySchemes` describing `adm_oauth`.
+- Ensure any OAuth client you register (if using Authorization Code) includes the agent's public callback URIs that Gemini requires (see the Cloud Console instructions). The wrapper itself does not host the OAuth client; the AgentCard simply advertises the IdP endpoints.
+- For quick demo/test runs the UI supports a simulation mode that exchanges an admin `A2A_API_KEY` for the real Octane `API_KEY` via the `/sim/token` endpoint. This is strictly for PoC and protected by the admin key.
+
 ### Step 2 — Verify the AgentCard is reachable
 
 ```bash
