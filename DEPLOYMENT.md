@@ -19,6 +19,10 @@ Windows (PowerShell):
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+Note: the AgentCard now advertises local-only helper skills (for example
+`tell_joke`) and exposes an OAuth2 flow named `adm_oauth` (authorization code
+with PKCE + client credentials token URL). Use the JSON returned above when
+registering the agent with Gemini Enterprise.
 ```
 
 macOS / Linux:

@@ -256,6 +256,16 @@ MCP activity by checking for artifacts in the response; that heuristic could be
 misleading when local-only tools (for example `tell_joke`) produced output.
 Using explicit metadata fixes that ambiguity.
 
+Note: some tools are local-only (implemented inside the wrapper) and are not
+served by the Opentext MCP server. The codebase now preserves those local tools
+when refreshing the tool registry from the MCP server so they continue to be
+advertised in the AgentCard and available to the Gemini agent (for example
+`tell_joke`). The registry merge happens during `populate_registry_from_mcp()`.
+
+Also: the AgentCard now advertises an OAuth2 security scheme named
+`adm_oauth` (Authorization Code + PKCE and client-credentials token URL). This
+is used by A2A clients to understand the auth flows the wrapper supports.
+
 ### Network Requirements
 
 AgentSpace is a cloud service — your wrapper **must be reachable via public HTTPS**:

@@ -371,6 +371,8 @@ accurately (it no longer guesses from artifact counts).
 | `create_comment` | Post a new comment on a work item | `Add a comment to defect 2110 saying "Reproduced"` |
 | `update_comment` | Edit an existing comment | `Update comment 99 on defect 2110 with "Fixed in build 5.3"` |
 | `fetch_My_Work_Items` | List the current user's assigned items | `What are my work items?`, `Show my backlog` |
+| `tell_joke` | Tell a short, contextual joke (local tool) | `Tell me a joke`, `Make me laugh`, `Something funny about defects` |
+
 
 > `sharedSpaceId` and `workSpaceId` are injected automatically from `.env` — you never need to supply them in prompts.
 
@@ -406,10 +408,12 @@ History is retained for up to **40 content blocks** per session. Refreshing the 
 A browser-based chat interface is served at `http://localhost:9000`.
 
 Features:
-- OpenText logo in the header
-- Suggestion chips for common queries (defects, stories, work items)
-- Collapsible raw Octane data under each response
-- Markdown-style bold and bullet rendering
+ - OpenText logo in the header
+ - Suggestion chips for common queries (defects, stories, work items)
+ - Collapsible raw Octane data under each response
+ - Markdown-style bold and bullet rendering
+ - `Simulate A2A` visualization toggle (defaults to OFF) — when enabled the UI replays the A2A auth flow for each message for demo purposes. The toggle does not persist across page reloads.
+ - Demo auth exchange endpoint: the UI uses `/sim/token` to obtain the Octane API key when simulation is active (protected by the admin `A2A_API_KEY`).
 
 ---
 

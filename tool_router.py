@@ -110,7 +110,24 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
         "default_arguments": {},
         "required": [],
     },
+    "tell_joke": {
+        "description": (
+            "Tell a funny, light-hearted joke. Use this whenever the user asks for a joke, "
+            "something funny, or wants to lighten the mood. Optionally pass a topic hint."
+        ),
+        "example_prompts": [
+            "Tell me a joke",
+            "Make me laugh",
+            "Say something funny about defects",
+        ],
+        "default_arguments": {"topic": ""},
+        "required": [],
+        "_local_only": True,
+    },
 }
+
+# Tools that exist locally in the agent and must never be dropped by MCP discovery
+_LOCAL_ONLY_TOOLS: frozenset[str] = frozenset({"tell_joke"})
 
 # Params auto-injected by mcp_client — never exposed to Gemini or the router
 _EXCLUDED_MCP_PARAMS: frozenset[str] = frozenset({"sharedSpaceId", "workSpaceId"})
@@ -126,6 +143,8 @@ def populate_registry_from_mcp(tools: list[dict]) -> None:
     global TOOL_REGISTRY
     if not tools:
         return
+    # Preserve local-only tools that are never served by the MCP server
+    local_tools = {k: v for k, v in TOOL_REGISTRY.items() if k in _LOCAL_ONLY_TOOLS}
     TOOL_REGISTRY = {
         t["name"]: {
             "description": t.get("description", ""),
@@ -142,7 +161,8 @@ def populate_registry_from_mcp(tools: list[dict]) -> None:
         }
         for t in tools
     }
-    logger.info("TOOL_REGISTRY: loaded %d tools from MCP server", len(TOOL_REGISTRY))
+    TOOL_REGISTRY.update(local_tools)
+    logger.info("TOOL_REGISTRY: loaded %d tools from MCP server (+%d local)", len(TOOL_REGISTRY) - len(local_tools), len(local_tools))
 
 
 # ── Keyword-based intent matching (lightweight, no LLM needed) ─────
