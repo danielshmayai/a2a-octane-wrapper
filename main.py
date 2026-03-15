@@ -27,6 +27,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -102,6 +103,13 @@ app = FastAPI(
     description="Bridges Google A2A protocol to the Opentext SDP MCP Server.",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 mcp = OctaneMcpClient()
 agent: GeminiAgent | None = None
 
@@ -167,6 +175,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def ui():
     """Serve the chat UI."""
     return FileResponse("static/index.html")
+
+
+@app.get("/auth-test")
+async def auth_test_ui():
+    """Serve the animated A2A OAuth2 auth flow test visualizer."""
+    return FileResponse("static/auth-flow-test.html")
 
 
 # ── Runtime configuration ────────────────────────────────────────────

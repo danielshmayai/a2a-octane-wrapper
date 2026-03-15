@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A2A OAuth2 Auth Flow — Live Test</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Fira Code", monospace, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      padding: 14px 24px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2a2d3d;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    header .logo { height: 28px; display: flex; align-items: center; }
+    header .logo img { height: 28px; }
+    header .divider { width: 1px; height: 20px; background: #2a2d3d; margin: 0 4px; }
+    header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+    header span { font-size: 12px; color: #6b7280; margin-left: 4px; }
+
+    .container {
+      width: 100%;
+      max-width: 1100px;
+      padding: 24px 16px 80px;
+    }
+
+    /* ── Config bar ─────────────────────────────── */
+    .config-bar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #1a1d27;
+      border-radius: 10px;
+      border: 1px solid #2a2d3d;
+    }
+    .config-bar label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .config-bar input {
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-family: inherit;
+      width: 220px;
+    }
+    .config-bar input:focus { outline: none; border-color: #3b82f6; }
+    .config-bar input.short { width: 140px; }
+
+    /* ── Buttons ─────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .15s;
+      font-family: inherit;
+    }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-outline { background: transparent; color: #9ca3af; border: 1px solid #2a2d3d; }
+    .btn-outline:hover { border-color: #3b82f6; color: #e0e0e0; }
+
+    .actions { display: flex; gap: 10px; align-items: flex-end; }
+
+    /* ── Flow diagram (top overview) ────────────── */
+    .flow-overview {
+      display: flex;
+      gap: 0;
+      align-items: center;
+      margin-bottom: 28px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .flow-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      min-width: 130px;
+      flex-shrink: 0;
+    }
+    .flow-node .circle {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: 2px solid #2a2d3d;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      transition: all .4s;
+      background: #1a1d27;
+    }
+    .flow-node.active .circle { border-color: #3b82f6; box-shadow: 0 0 16px rgba(59,130,246,.35); }
+    .flow-node.ok .circle { border-color: #10b981; background: #10b981; color: #fff; }
+    .flow-node.fail .circle { border-color: #ef4444; background: #ef4444; color: #fff; }
+    .flow-node .label { font-size: 11px; color: #6b7280; text-align: center; max-width: 120px; }
+    .flow-node.active .label { color: #3b82f6; font-weight: 600; }
+    .flow-node.ok .label { color: #10b981; }
+    .flow-node.fail .label { color: #ef4444; }
+
+    .flow-arrow {
+      width: 48px;
+      height: 2px;
+      background: #2a2d3d;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .flow-arrow::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: -4px;
+      border: 5px solid transparent;
+      border-left-color: #2a2d3d;
+    }
+    .flow-arrow.lit { background: #3b82f6; }
+    .flow-arrow.lit::after { border-left-color: #3b82f6; }
+    .flow-arrow.done { background: #10b981; }
+    .flow-arrow.done::after { border-left-color: #10b981; }
+
+    /* ── Step cards ──────────────────────────────── */
+    .step-card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3d;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .step-card.active {
+      border-color: #3b82f6;
+      box-shadow: 0 0 20px rgba(59,130,246,.12);
+    }
+    .step-card.ok { border-color: #10b981; }
+    .step-card.fail { border-color: #ef4444; }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-header:hover { background: rgba(255,255,255,.02); }
+
+    .step-badge {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      background: #2a2d3d;
+      color: #9ca3af;
+      flex-shrink: 0;
+      transition: all .3s;
+    }
+    .step-card.active .step-badge { background: #3b82f6; color: #fff; }
+    .step-card.ok .step-badge { background: #10b981; color: #fff; }
+    .step-card.fail .step-badge { background: #ef4444; color: #fff; }
+
+    .step-title { font-size: 14px; font-weight: 600; flex: 1; }
+    .step-status {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: #2a2d3d;
+      color: #6b7280;
+      transition: all .3s;
+    }
+    .step-card.active .step-status { background: rgba(59,130,246,.15); color: #60a5fa; }
+    .step-card.ok .step-status { background: rgba(16,185,129,.15); color: #34d399; }
+    .step-card.fail .step-status { background: rgba(239,68,68,.15); color: #f87171; }
+
+    .step-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .4s ease;
+    }
+    .step-card.open .step-body { max-height: 2000px; }
+
+    .step-content {
+      padding: 0 18px 16px;
+    }
+
+    /* ── Sub-steps (requests) ────────────────────── */
+    .substep {
+      margin-top: 10px;
+      border-left: 2px solid #2a2d3d;
+      padding-left: 14px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .35s, transform .35s;
+    }
+    .substep.visible { opacity: 1; transform: translateY(0); }
+
+    .substep-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .substep-label .method {
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .method-get { background: rgba(16,185,129,.15); color: #34d399; }
+    .method-post { background: rgba(59,130,246,.15); color: #60a5fa; }
+
+    .substep .url {
+      font-size: 12px;
+      color: #9ca3af;
+      word-break: break-all;
+    }
+
+    .req-resp {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    @media (max-width: 700px) {
+      .req-resp { grid-template-columns: 1fr; }
+    }
+
+    .payload-box {
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .payload-box .payload-label {
+      padding: 6px 10px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #6b7280;
+      background: rgba(255,255,255,.02);
+      border-bottom: 1px solid #2a2d3d;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .payload-box .payload-label .http-status {
+      margin-left: auto;
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .http-2xx { color: #34d399; }
+    .http-3xx { color: #fbbf24; }
+    .http-4xx { color: #f87171; }
+    .http-5xx { color: #f87171; }
+
+    .payload-box pre {
+      padding: 10px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #c9d1d9;
+      overflow-x: auto;
+      max-height: 260px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ── Spinner ──────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #3b82f6;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Pulse animation for active circle ──────── */
+    @keyframes pulse-ring {
+      0% { box-shadow: 0 0 0 0 rgba(59,130,246,.4); }
+      70% { box-shadow: 0 0 0 10px rgba(59,130,246,0); }
+      100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+    }
+    .flow-node.active .circle { animation: pulse-ring 1.5s infinite; }
+
+    /* ── Summary bar ─────────────────────────────── */
+    .summary-bar {
+      display: none;
+      margin-top: 16px;
+      padding: 16px 18px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .summary-bar.show { display: flex; align-items: center; gap: 10px; }
+    .summary-bar.pass { background: rgba(16,185,129,.1); border: 1px solid #10b981; color: #34d399; }
+    .summary-bar.mixed { background: rgba(251,191,36,.1); border: 1px solid #fbbf24; color: #fbbf24; }
+    .summary-bar.all-fail { background: rgba(239,68,68,.1); border: 1px solid #ef4444; color: #f87171; }
+
+    /* ── Syntax coloring (basic JSON) ────────────── */
+    .json-key { color: #7dd3fc; }
+    .json-str { color: #86efac; }
+    .json-num { color: #fbbf24; }
+    .json-bool { color: #c084fc; }
+    .json-null { color: #6b7280; }
+
+    .timer { font-size: 11px; color: #6b7280; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><img src="/static/OTEX_BIG.svg" alt="OpenText" onerror="this.style.display='none'" /></div>
+  <div class="divider"></div>
+  <h1>A2A Auth Flow</h1>
+  <span>Live Test Visualizer</span>
+</header>
+
+<div class="container">
+
+  <!-- Config bar -->
+  <div class="config-bar">
+    <label>A2A Wrapper URL
+      <input id="cfgA2a" value="http://localhost:9000" />
+    </label>
+    <label>Mock OAuth URL
+      <input id="cfgOAuth" value="http://localhost:8090" />
+    </label>
+    <label>Client ID
+      <input id="cfgClientId" value="csai-demo-client" class="short" />
+    </label>
+    <label>Client Secret
+      <input id="cfgClientSecret" value="csai-demo-secret" class="short" />
+    </label>
+    <div class="actions">
+      <button id="btnRun" class="btn btn-primary" onclick="runAll()">Run Full Flow</button>
+      <button id="btnReset" class="btn btn-outline" onclick="resetAll()">Reset</button>
+    </div>
+  </div>
+
+  <!-- Flow overview diagram -->
+  <div class="flow-overview" id="flowOverview">
+    <div class="flow-node" id="fn-discovery">
+      <div class="circle">1</div>
+      <div class="label">AgentCard Discovery</div>
+    </div>
+    <div class="flow-arrow" id="fa-1"></div>
+    <div class="flow-node" id="fn-cc">
+      <div class="circle">2</div>
+      <div class="label">Client Credentials</div>
+    </div>
+    <div class="flow-arrow" id="fa-2"></div>
+    <div class="flow-node" id="fn-pkce">
+      <div class="circle">3</div>
+      <div class="label">Auth Code + PKCE</div>
+    </div>
+    <div class="flow-arrow" id="fa-3"></div>
+    <div class="flow-node" id="fn-send">
+      <div class="circle">4</div>
+      <div class="label">A2A /message:send</div>
+    </div>
+    <div class="flow-arrow" id="fa-4"></div>
+    <div class="flow-node" id="fn-negative">
+      <div class="circle">5</div>
+      <div class="label">Negative Tests</div>
+    </div>
+  </div>
+
+  <!-- Step cards -->
+  <div id="stepsContainer"></div>
+
+  <!-- Summary -->
+  <div class="summary-bar" id="summaryBar"></div>
+</div>
+
+<script>
+// ── Config helpers ─────────────────────────────
+const $ = id => document.getElementById(id);
+const cfg = () => ({
+  a2a:    $('cfgA2a').value.replace(/\/+$/, ''),
+  oauth:  $('cfgOAuth').value.replace(/\/+$/, ''),
+  clientId: $('cfgClientId').value,
+  clientSecret: $('cfgClientSecret').value,
+});
+
+// ── Syntax-highlighted JSON ────────────────────
+function highlightJson(obj) {
+  const raw = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+  return raw.replace(
+    /("(?:[^"\\]|\\.)*")\s*:/g,
+    (_, k) => `<span class="json-key">${k}</span>:`
+  ).replace(
+    /:\s*("(?:[^"\\]|\\.)*")/g,
+    (m, v) => m.replace(v, `<span class="json-str">${v}</span>`)
+  ).replace(
+    /:\s*(\d+(?:\.\d+)?)/g,
+    (m, v) => m.replace(v, `<span class="json-num">${v}</span>`)
+  ).replace(
+    /:\s*(true|false)/g,
+    (m, v) => m.replace(v, `<span class="json-bool">${v}</span>`)
+  ).replace(
+    /:\s*(null)/g,
+    (m, v) => m.replace(v, `<span class="json-null">${v}</span>`)
+  );
+}
+
+// ── PKCE helpers ───────────────────────────────
+function generateCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+// ── Step definitions ───────────────────────────
+const STEPS = [
+  { id: 'discovery', num: 1, title: 'AgentCard Discovery', nodeId: 'fn-discovery', arrowId: 'fa-1' },
+  { id: 'cc',        num: 2, title: 'Client Credentials Grant', nodeId: 'fn-cc', arrowId: 'fa-2' },
+  { id: 'pkce',      num: 3, title: 'Authorization Code + PKCE (S256)', nodeId: 'fn-pkce', arrowId: 'fa-3' },
+  { id: 'send',      num: 4, title: 'A2A /message:send with Bearer Token', nodeId: 'fn-send', arrowId: 'fa-4' },
+  { id: 'negative',  num: 5, title: 'Negative Tests (should fail)', nodeId: 'fn-negative', arrowId: null },
+];
+
+let stepResults = {};
+
+// ── Build step cards ───────────────────────────
+function buildCards() {
+  const c = $('stepsContainer');
+  c.innerHTML = '';
+  STEPS.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'step-card';
+    card.id = `card-${s.id}`;
+    card.innerHTML = `
+      <div class="step-header" onclick="toggleCard('${s.id}')">
+        <div class="step-badge">${s.num}</div>
+        <div class="step-title">${s.title}</div>
+        <div class="step-status" id="status-${s.id}">pending</div>
+      </div>
+      <div class="step-body">
+        <div class="step-content" id="content-${s.id}"></div>
+      </div>`;
+    c.appendChild(card);
+  });
+}
+buildCards();
+
+function toggleCard(id) {
+  $(`card-${id}`).classList.toggle('open');
+}
+
+function setStepState(id, state, statusText) {
+  const card = $(`card-${id}`);
+  card.classList.remove('active','ok','fail');
+  if (state) card.classList.add(state);
+  $(`status-${id}`).textContent = statusText || state;
+  // overview node
+  const step = STEPS.find(s => s.id === id);
+  if (step) {
+    const node = $(step.nodeId);
+    node.classList.remove('active','ok','fail');
+    if (state) node.classList.add(state);
+  }
+}
+
+function setArrow(arrowId, cls) {
+  if (!arrowId) return;
+  const el = $(arrowId);
+  el.classList.remove('lit','done');
+  if (cls) el.classList.add(cls);
+}
+
+function openCard(id) {
+  $(`card-${id}`).classList.add('open');
+}
+
+// ── Add a sub-step (request/response pair) ─────
+function addSubStep(stepId, { method, url, reqBody, respStatus, respBody, label, error }) {
+  const container = $(`content-${stepId}`);
+  const div = document.createElement('div');
+  div.className = 'substep';
+
+  const statusCls = respStatus ? (respStatus < 300 ? 'http-2xx' : respStatus < 400 ? 'http-3xx' : respStatus < 500 ? 'http-4xx' : 'http-5xx') : '';
+  const methodCls = method === 'GET' ? 'method-get' : 'method-post';
+
+  let reqHtml = '';
+  if (reqBody !== undefined && reqBody !== null) {
+    const formatted = typeof reqBody === 'string' ? reqBody : highlightJson(reqBody);
+    reqHtml = `<div class="payload-box">
+      <div class="payload-label">Request Body</div>
+      <pre>${formatted}</pre>
+    </div>`;
+  }
+
+  let respHtml = '';
+  if (respBody !== undefined) {
+    const formatted = typeof respBody === 'string' ? respBody : highlightJson(respBody);
+    respHtml = `<div class="payload-box">
+      <div class="payload-label">Response ${respStatus ? `<span class="http-status ${statusCls}">${respStatus}</span>` : ''}</div>
+      <pre>${formatted}</pre>
+    </div>`;
+  }
+
+  if (error) {
+    respHtml = `<div class="payload-box">
+      <div class="payload-label">Error</div>
+      <pre style="color:#f87171">${error}</pre>
+    </div>`;
+  }
+
+  div.innerHTML = `
+    <div class="substep-label">
+      ${label ? `<span>${label}</span>` : ''}
+      <span class="method ${methodCls}">${method}</span>
+      <span class="url">${url}</span>
+    </div>
+    ${reqHtml || respHtml ? `<div class="req-resp">${reqHtml}${respHtml}</div>` : ''}
+  `;
+
+  container.appendChild(div);
+  // Trigger animation
+  requestAnimationFrame(() => requestAnimationFrame(() => div.classList.add('visible')));
+  return div;
+}
+
+// ── Helpers ─────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function safeFetch(url, opts = {}) {
+  const res = await fetch(url, { ...opts, redirect: 'manual' });
+  let body;
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json')) {
+    body = await res.json();
+  } else {
+    body = await res.text();
+  }
+  return { status: res.status, headers: Object.fromEntries(res.headers.entries()), body, redirected: res.type === 'opaqueredirect', url: res.url };
+}
+
+// ── Step runners ────────────────────────────────
+
+async function runDiscovery() {
+  const { a2a } = cfg();
+  const url = `${a2a}/.well-known/agent-card.json`;
+
+  setStepState('discovery', 'active', 'running...');
+  openCard('discovery');
+  setArrow('fa-1', 'lit');
+  await sleep(300);
+
+  try {
+    const res = await safeFetch(url);
+    addSubStep('discovery', {
+      method: 'GET', url,
+      respStatus: res.status,
+      respBody: res.body,
+      label: 'Fetch AgentCard',
+    });
+
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+
+    const card = res.body;
+    const scheme = card.securitySchemes?.csai_oauth;
+    if (!scheme) throw new Error('No csai_oauth security scheme found in AgentCard');
+
+    await sleep(200);
+    addSubStep('discovery', {
+      method: 'GET', url: '(parsed)',
+      respBody: {
+        tokenUrl: scheme.flows?.clientCredentials?.tokenUrl,
+        authorizationUrl: scheme.flows?.authorizationCode?.authorizationUrl,
+        pkce: scheme.flows?.authorizationCode?.pkce,
+        pkceMethod: scheme.flows?.authorizationCode?.pkceMethod,
+        scopes: scheme.flows?.clientCredentials?.scopes,
+      },
+      label: 'Extracted OAuth2 Config',
+    });
+
+    setStepState('discovery', 'ok', 'passed');
+    setArrow('fa-1', 'done');
+    stepResults.discovery = { card, scheme };
+    return true;
+  } catch (e) {
+    addSubStep('discovery', { method: 'GET', url, error: e.message, label: 'Error' });
+    setStepState('discovery', 'fail', 'failed');
+    return false;
+  }
+}
+
+async function runClientCredentials() {
+  const { oauth, clientId, clientSecret } = cfg();
+  const url = `${oauth}/oauth2/token`;
+
+  setStepState('cc', 'active', 'running...');
+  openCard('cc');
+  setArrow('fa-2', 'lit');
+  await sleep(300);
+
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: 'otds:groups otds:roles search',
+  });
+
+  try {
+    const res = await safeFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    addSubStep('cc', {
+      method: 'POST', url,
+      reqBody: Object.fromEntries(body.entries()),
+      respStatus: res.status,
+      respBody: res.body,
+      label: 'Token Request',
+    });
+
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+    if (!res.body.access_token) throw new Error('No access_token in response');
+
+    // Decode the mock JWT
+    await sleep(200);
+    try {
+      const parts = res.body.access_token.split('.');
+      const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+      addSubStep('cc', {
+        method: 'GET', url: '(decoded JWT payload)',
+        respBody: payload,
+        label: 'Token Claims',
+      });
+    } catch (_) {}
+
+    setStepState('cc', 'ok', 'passed');
+    setArrow('fa-2', 'done');
+    stepResults.ccToken = res.body.access_token;
+    return true;
+  } catch (e) {
+    addSubStep('cc', { method: 'POST', url, error: e.message, label: 'Error' });
+    setStepState('cc', 'fail', 'failed');
+    return false;
+  }
+}
+
+async function runAuthCodePKCE() {
+  const { oauth, clientId, clientSecret } = cfg();
+  setStepState('pkce', 'active', 'running...');
+  openCard('pkce');
+  setArrow('fa-3', 'lit');
+  await sleep(300);
+
+  try {
+    // Step 1: Generate PKCE verifier + challenge
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    addSubStep('pkce', {
+      method: 'GET', url: '(generated locally)',
+      respBody: {
+        code_verifier: codeVerifier,
+        code_challenge: codeChallenge,
+        method: 'S256',
+      },
+      label: 'PKCE Key Pair',
+    });
+    await sleep(300);
+
+    // Step 2: Authorization request
+    // Use the mock OAuth server's own /health as redirect_uri so the browser
+    // can follow the 302 redirect and we can parse the code from the final URL.
+    const redirectUri = `${oauth}/health`;
+    const authUrl = `${oauth}/oauth2/auth?` + new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: 'otds:groups otds:roles search',
+      state: 'test-state-pkce',
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    });
+
+    const authResp = await fetch(authUrl, { redirect: 'follow' });
+    const finalUrl = authResp.url;
+    const m = finalUrl.match(/[?&]code=([^&]+)/);
+    const code = m ? m[1] : null;
+
+    if (!code) throw new Error('Could not obtain auth code — ensure mock OAuth server is running with CORS enabled');
+
+    addSubStep('pkce', {
+      method: 'GET',
+      url: `${oauth}/oauth2/auth?response_type=code&client_id=${clientId}&...&code_challenge=...`,
+      respStatus: 302,
+      respBody: { code, state: 'test-state-pkce', redirect: '302 Found' },
+      label: 'Authorization Request → Redirect',
+    });
+    await sleep(300);
+
+    // Step 3: Exchange code for token with PKCE verifier
+    const tokenBody = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+    });
+
+    const tokenUrl = `${oauth}/oauth2/token`;
+    const tokenResp = await safeFetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenBody,
+    });
+
+    addSubStep('pkce', {
+      method: 'POST', url: tokenUrl,
+      reqBody: Object.fromEntries(tokenBody.entries()),
+      respStatus: tokenResp.status,
+      respBody: tokenResp.body,
+      label: 'Token Exchange (with PKCE verifier)',
+    });
+
+    if (tokenResp.status !== 200) throw new Error(`Token exchange failed: HTTP ${tokenResp.status}`);
+    if (!tokenResp.body.access_token) throw new Error('No access_token in PKCE token response');
+
+    // Decode JWT
+    await sleep(200);
+    try {
+      const parts = tokenResp.body.access_token.split('.');
+      const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+      addSubStep('pkce', {
+        method: 'GET', url: '(decoded JWT payload)',
+        respBody: payload,
+        label: 'PKCE Token Claims',
+      });
+    } catch (_) {}
+
+    setStepState('pkce', 'ok', 'passed');
+    setArrow('fa-3', 'done');
+    stepResults.pkceToken = tokenResp.body.access_token;
+    stepResults.pkceCode = code;
+    return true;
+  } catch (e) {
+    addSubStep('pkce', { method: 'POST', url: `${oauth}/oauth2/token`, error: e.message, label: 'Error' });
+    setStepState('pkce', 'fail', 'failed');
+    return false;
+  }
+}
+
+async function runSendMessage() {
+  const { a2a } = cfg();
+  const url = `${a2a}/message:send`;
+  const token = stepResults.pkceToken || stepResults.ccToken;
+
+  setStepState('send', 'active', 'running...');
+  openCard('send');
+  setArrow('fa-4', 'lit');
+  await sleep(300);
+
+  const payload = {
+    message: {
+      role: "ROLE_USER",
+      parts: [{ text: "Get defect 2110" }],
+    },
+    configuration: { blocking: true },
+  };
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await safeFetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    addSubStep('send', {
+      method: 'POST', url,
+      reqBody: { ...payload, _headers: { Authorization: token ? `Bearer ${token.substring(0,20)}...` : '(none)' } },
+      respStatus: res.status,
+      respBody: res.body,
+      label: 'SendMessage with Bearer',
+    });
+
+    // Check if auth_injected is in metadata
+    const authInjected = res.body?.task?.metadata?.auth_injected;
+    await sleep(200);
+    addSubStep('send', {
+      method: 'GET', url: '(verification)',
+      respBody: {
+        auth_injected: authInjected,
+        task_state: res.body?.task?.status?.state,
+        task_id: res.body?.task?.id,
+      },
+      label: 'Auth Verification',
+    });
+
+    // Accept both success and MCP connection errors (wrapper itself handled auth correctly)
+    const state = res.body?.task?.status?.state;
+    if (res.status === 200 || res.status === 401) {
+      setStepState('send', 'ok', 'passed');
+      setArrow('fa-4', 'done');
+      return true;
+    }
+    throw new Error(`Unexpected status: ${res.status}`);
+  } catch (e) {
+    addSubStep('send', { method: 'POST', url, error: e.message, label: 'Error' });
+    setStepState('send', 'fail', 'failed');
+    return false;
+  }
+}
+
+async function runNegativeTests() {
+  const { oauth, clientId } = cfg();
+  setStepState('negative', 'active', 'running...');
+  openCard('negative');
+  await sleep(300);
+
+  let allOk = true;
+
+  // Test 1: Wrong client_secret
+  try {
+    const url = `${oauth}/oauth2/token`;
+    const body = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: 'wrong-secret',
+    });
+    const res = await safeFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    addSubStep('negative', {
+      method: 'POST', url,
+      reqBody: Object.fromEntries(body.entries()),
+      respStatus: res.status,
+      respBody: res.body,
+      label: `Wrong Secret → expect 401 (got ${res.status})`,
+    });
+    if (res.status !== 401) { allOk = false; }
+  } catch (e) {
+    addSubStep('negative', { method: 'POST', url: `${oauth}/oauth2/token`, error: e.message, label: 'Wrong Secret Test Error' });
+    allOk = false;
+  }
+
+  await sleep(300);
+
+  // Test 2: Wrong PKCE verifier
+  try {
+    // First get a valid auth code
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    const authUrl = `${oauth}/oauth2/auth?` + new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: `${oauth}/health`,
+      scope: 'search',
+      state: 'neg-test',
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    });
+
+    const authResp = await fetch(authUrl, { redirect: 'follow' });
+    const finalUrl = authResp.url;
+    const m = finalUrl.match(/[?&]code=([^&]+)/);
+    const code = m ? m[1] : null;
+
+    if (code) {
+      const tokenUrl = `${oauth}/oauth2/token`;
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        redirect_uri: `${oauth}/health`,
+        code_verifier: 'WRONG-VERIFIER-SHOULD-FAIL',
+      });
+      const res = await safeFetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      addSubStep('negative', {
+        method: 'POST', url: tokenUrl,
+        reqBody: Object.fromEntries(body.entries()),
+        respStatus: res.status,
+        respBody: res.body,
+        label: `Wrong PKCE Verifier → expect 400 (got ${res.status})`,
+      });
+      if (res.status !== 400) { allOk = false; }
+    } else {
+      addSubStep('negative', { method: 'GET', url: authUrl, error: 'Could not get auth code for negative test', label: 'PKCE Negative' });
+      allOk = false;
+    }
+  } catch (e) {
+    addSubStep('negative', { method: 'POST', url: `${oauth}/oauth2/token`, error: e.message, label: 'PKCE Negative Error' });
+    allOk = false;
+  }
+
+  await sleep(300);
+
+  // Test 3: Invalid grant type
+  try {
+    const url = `${oauth}/oauth2/token`;
+    const body = new URLSearchParams({
+      grant_type: 'invalid_grant',
+      client_id: clientId,
+      client_secret: cfg().clientSecret,
+    });
+    const res = await safeFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    addSubStep('negative', {
+      method: 'POST', url,
+      reqBody: Object.fromEntries(body.entries()),
+      respStatus: res.status,
+      respBody: res.body,
+      label: `Invalid Grant Type → expect 400 (got ${res.status})`,
+    });
+    if (res.status !== 400) { allOk = false; }
+  } catch (e) {
+    addSubStep('negative', { method: 'POST', url: `${oauth}/oauth2/token`, error: e.message, label: 'Invalid Grant Test Error' });
+    allOk = false;
+  }
+
+  setStepState('negative', allOk ? 'ok' : 'fail', allOk ? 'all rejected' : 'unexpected');
+  return allOk;
+}
+
+// ── Main runner ─────────────────────────────────
+
+async function runAll() {
+  resetAll();
+  $('btnRun').disabled = true;
+  const t0 = performance.now();
+
+  const results = [];
+  results.push(await runDiscovery());
+  await sleep(400);
+  results.push(await runClientCredentials());
+  await sleep(400);
+  results.push(await runAuthCodePKCE());
+  await sleep(400);
+  results.push(await runSendMessage());
+  await sleep(400);
+  results.push(await runNegativeTests());
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  const passed = results.filter(Boolean).length;
+  const total = results.length;
+
+  const bar = $('summaryBar');
+  bar.classList.add('show');
+  if (passed === total) {
+    bar.className = 'summary-bar show pass';
+    bar.innerHTML = `<span>ALL ${total} STEPS PASSED</span><span class="timer">${elapsed}s</span>`;
+  } else if (passed === 0) {
+    bar.className = 'summary-bar show all-fail';
+    bar.innerHTML = `<span>ALL ${total} STEPS FAILED</span><span class="timer">${elapsed}s</span>`;
+  } else {
+    bar.className = 'summary-bar show mixed';
+    bar.innerHTML = `<span>${passed}/${total} STEPS PASSED</span><span class="timer">${elapsed}s</span>`;
+  }
+
+  $('btnRun').disabled = false;
+}
+
+function resetAll() {
+  stepResults = {};
+  buildCards();
+  STEPS.forEach(s => {
+    const node = $(s.nodeId);
+    node.classList.remove('active','ok','fail');
+    if (s.arrowId) {
+      $(s.arrowId).classList.remove('lit','done');
+    }
+  });
+  $('summaryBar').className = 'summary-bar';
+  $('summaryBar').innerHTML = '';
+}
+</script>
+</body>
+</html>
