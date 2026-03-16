@@ -33,8 +33,8 @@ A2A_API_KEY: str = os.getenv("A2A_API_KEY", "")
 
 # --- Agent Identity & OAuth2 ---
 # Public URL of this agent (used in the AgentCard)
-AGENT_URL: str = os.getenv("AGENT_URL", "https://csai-a2a-agent.dev.ca.opentext.com")
-AGENT_NAME: str = os.getenv("AGENT_NAME", "CSAI Agent")
+AGENT_URL: str = os.getenv("AGENT_URL", "http://localhost:9000")
+AGENT_NAME: str = os.getenv("AGENT_NAME", "ADM Agent")
 # OTDS OAuth2 endpoints
 OAUTH2_AUTH_URL: str = os.getenv(
     "OAUTH2_AUTH_URL", "https://otdsauth.dev.ca.opentext.com/oauth2/auth"

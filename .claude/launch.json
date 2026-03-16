@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock-oauth",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["mock_oauth_server.py"],
+      "port": 8090
+    },
+    {
+      "name": "a2a-wrapper",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py"],
+      "port": 8000
+    }
+  ]
+}

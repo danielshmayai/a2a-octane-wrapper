@@ -31,7 +31,7 @@ curl -X POST http://localhost:9000/message:send \
       "messageId": "msg-1",
       "contextId": "my-session-001",
       "role": "ROLE_USER",
-      "parts": [{"text": "Get defect 2110"}]
+      "parts": [{"text": "Get defect 1314"}]
     },
     "configuration": {"blocking": true}
   }'
@@ -60,7 +60,7 @@ def ask(text: str) -> str:
     # Extract text from the first artifact
     return task["status"]["message"]["parts"][0]["text"]
 
-print(ask("Get defect 2110"))
+print(ask("Get defect 1314"))
 print(ask("Who is the owner?"))   # follow-up — retains context
 ```
 
@@ -336,7 +336,7 @@ curl -X POST http://localhost:9000/message:send \
       "messageId": "msg-1",
       "contextId": "my-session-123",
       "role": "ROLE_USER",
-      "parts": [{"text": "Get defect 2110"}]
+      "parts": [{"text": "Get defect 1314"}]
     },
     "configuration": {"blocking": true}
   }'
@@ -364,12 +364,12 @@ accurately (it no longer guesses from artifact counts).
 
 | Tool | Description | Example prompts |
 |---|---|---|
-| `get_defect` | Retrieve a defect by numeric ID | `Get defect 2110`, `Show me bug #9001` |
+| `get_defect` | Retrieve a defect by numeric ID | `Get defect 1314`, `Show me bug #9001` |
 | `get_story` | Retrieve a user story by numeric ID | `Get story 1234`, `Show user story 55` |
 | `get_feature` | Retrieve a feature by numeric ID | `Get feature 77`, `Show feature 200` |
-| `get_comments` | Get all comments for an entity | `Show comments on defect 2110` |
-| `create_comment` | Post a new comment on a work item | `Add a comment to defect 2110 saying "Reproduced"` |
-| `update_comment` | Edit an existing comment | `Update comment 99 on defect 2110 with "Fixed in build 5.3"` |
+| `get_comments` | Get all comments for an entity | `Show comments on defect 1314` |
+| `create_comment` | Post a new comment on a work item | `Add a comment to defect 1314 saying "Reproduced"` |
+| `update_comment` | Edit an existing comment | `Update comment 99 on defect 1314 with "Fixed in build 5.3"` |
 | `fetch_My_Work_Items` | List the current user's assigned items | `What are my work items?`, `Show my backlog` |
 | `tell_joke` | Tell a short, contextual joke (local tool) | `Tell me a joke`, `Make me laugh`, `Something funny about defects` |
 
@@ -384,15 +384,15 @@ accurately (it no longer guesses from artifact counts).
 The Gemini agent maintains **per-session conversation history**. Each session generates a stable `contextId` sent with every message, giving Gemini full context for follow-up questions.
 
 ```
-User:  Get defect 2110
-Agent: Defect 2110 — "Login page crashes on empty password"
+User:  Get defect 1314
+Agent: Defect 1314 — "Login page crashes on empty password"
        Phase: In Progress  |  Severity: High  |  Assigned: Alice
 
 User:  Who is the owner?
 Agent: The defect is assigned to Alice (alice@example.com).
 
 User:  Add a comment saying "Reproduced on build 5.3"
-Agent: Done — comment posted to defect 2110.
+Agent: Done — comment posted to defect 1314.
 
 User:  Add a funny comment
 Agent: Posted: "This bug is so slippery it should have its own LinkedIn profile."
@@ -623,10 +623,10 @@ After clicking **Finish** (or **Skip & Finish**):
  - Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **OT ADM Agent**.
 
 ```
-@OT ADM Agent Get defect 2110
+@OT ADM Agent Get defect 1314
 @OT ADM Agent What are my work items?
 @OT ADM Agent Show comments on story 55
-@OT ADM Agent Add a comment to defect 2110 saying "Under investigation"
+@OT ADM Agent Add a comment to defect 1314 saying "Under investigation"
 @OT ADM Agent Get feature 200 and summarize it
 ```
 

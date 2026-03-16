@@ -31,13 +31,13 @@ This service allows AI agents and chat interfaces that speak the **Google A2A pr
 #### Flow 1  Gemini Agent: Get a defect
 
 ```
-User: "Get defect 2110"
+User: "Get defect 1314"
   
   
 Gemini agent receives user message
-Gemini selects tool: get_defect(entityId=2110)
+Gemini selects tool: get_defect(entityId=1314)
   
-   MCP call: tools/call  name=get_defect  arguments={entityId:2110, sharedSpaceId:..., workSpaceId:...}
+   MCP call: tools/call  name=get_defect  arguments={entityId:1314, sharedSpaceId:..., workSpaceId:...}
   
   
 Opentext SDP returns defect JSON
@@ -70,12 +70,12 @@ A2A Task (COMPLETED)
 #### Flow 3  Gemini Agent: Multi-step (get defect then add comment)
 
 ```
-User: "Get defect 2110 and add a comment saying 'Reproduced on build 5.3'"
+User: "Get defect 1314 and add a comment saying 'Reproduced on build 5.3'"
   
   
 Gemini selects two tools in sequence:
-  Round 1  get_defect(entityId=2110)
-  Round 2  create_comment(entityId=2110, entityType="defect", text="Reproduced on build 5.3")
+   Round 1  get_defect(entityId=1314)
+   Round 2  create_comment(entityId=1314, entityType="defect", text="Reproduced on build 5.3")
   
   
 Gemini confirms both actions in final summary
@@ -85,7 +85,7 @@ A2A Task (COMPLETED)
 #### Flow 4  Auto-generated comment text
 
 ```
-User: "Add a funny comment to defect 2110"
+User: "Add a funny comment to defect 1314"
   
   
 _maybe_inject_generated_text() detects "funny" trigger word
@@ -95,7 +95,7 @@ _maybe_inject_generated_text() detects "funny" trigger word
   
   
 Rewritten message passed to agentic loop:
-  "Add a funny comment to defect 2110. Use exactly this text: '...'"
+   "Add a funny comment to defect 1314. Use exactly this text: '...'"
   
   
 Gemini calls create_comment with the generated text
@@ -105,11 +105,11 @@ A2A Task (COMPLETED)
 #### Flow 5  Keyword fallback (no Gemini API key)
 
 ```
-User: "Get defect 2110"
+User: "Get defect 1314"
   
   
 Keyword scorer resolves intent  get_defect
-Regex extracts entityId = 2110
+Regex extracts entityId = 1314
   
    MCP call: tools/call  name=get_defect
   
@@ -186,7 +186,7 @@ The screenshot below shows what this looks like in practice:
 └─────────────────────────────────────────────────┘
 ```
 
-After registering the OT ADM Agent, it appears in this list and users can type `@OT ADM Agent Get defect 2110` to query Opentext SDP directly from AgentSpace.
+After registering the OT ADM Agent, it appears in this list and users can type `@OT ADM Agent Get defect 1314` to query Opentext SDP directly from AgentSpace.
 
 ### A2A Protocol Primer
 
@@ -330,9 +330,9 @@ Click **Save** — the agent now appears in the `@` mention popover alongside ot
 Type `@` in the chat input, select **OT ADM Agent**, and continue with your request:
 
 ```
-@OT ADM Agent Get defect 2110
+@OT ADM Agent Get defect 1314
 @OT ADM Agent What are my work items?
-@OT ADM Agent Add a comment to defect 2110 saying "Fixed in 5.3"
+@OT ADM Agent Add a comment to defect 1314 saying "Fixed in 5.3"
 @OT ADM Agent Show comments on story 55
 @OT ADM Agent Get feature 200 and summarize it
 ```
@@ -496,7 +496,7 @@ Task(COMPLETED)
   "params": {
     "name": "get_defect",
     "arguments": {
-      "entityId": 2110,
+      "entityId": 1314,
       "sharedSpaceId": 1001,
       "workSpaceId": 1002
     }

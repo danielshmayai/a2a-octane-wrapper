@@ -34,7 +34,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "get_defect": {
         "description": "Retrieve a defect raw data from Opentext SDP by its unique identifier.",
         "example_prompts": [
-            "Get defect 2110",
+            "Get defect 1314",
             "Show me bug #9001",
             "Fetch defect details for 42",
         ],
@@ -64,8 +64,8 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "Retrieve all comments and discussion threads for a specific entity "
             "(defect, story, or feature)."
         ),
-        "example_prompts": [
-            "Show comments on defect 2110",
+            "example_prompts": [
+            "Show comments on defect 1314",
             "Get the discussion for story 55",
             "List all comments on feature 77",
         ],
@@ -78,7 +78,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "The text parameter accepts HTML for rich formatting."
         ),
         "example_prompts": [
-            "Add a comment to defect 2110 saying 'Reproduced on build 5.3'",
+            "Add a comment to defect 1314 saying 'Reproduced on build 5.3'",
             "Comment on story 55: needs clarification",
         ],
         "default_arguments": {"entityId": None, "entityType": None, "text": ""},
@@ -90,7 +90,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "The text parameter accepts HTML for rich formatting."
         ),
         "example_prompts": [
-            "Update comment 99 on defect 2110 with new text",
+            "Update comment 99 on defect 1314 with new text",
             "Edit comment 12 on story 55",
         ],
         "default_arguments": {"commentId": None, "entityId": None, "entityType": None, "text": ""},
