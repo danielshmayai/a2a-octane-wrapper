@@ -3,15 +3,17 @@ A2A ↔ Opentext SDP MCP Agent Wrapper
 ===============================
 
 A lightweight FastAPI application that bridges the Google A2A protocol
-(HTTP+JSON binding) with the internal Opentext SDP MCP Server.
+(both HTTP+JSON and JSON-RPC 2.0 bindings) with the internal Opentext
+SDP MCP Server.
 
 Architecture:
 
     Gemini Enterprise ──A2A──▶  this wrapper  ──JSON-RPC POST──▶  Opentext SDP /mcp
 
 Endpoints:
+    POST /                              → A2A JSON-RPC 2.0 binding (Gemini Enterprise default)
     GET  /.well-known/agent-card.json   → AgentCard discovery
-    POST /message:send                  → A2A SendMessage (primary)
+    POST /message:send                  → A2A HTTP+JSON binding (REST)
     GET  /health                        → Liveness check
 """
 
@@ -23,7 +25,7 @@ import asyncio
 
 import httpx
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -40,6 +42,8 @@ from a2a_models import (
     Artifact,
     AuthorizationCodeFlow,
     ClientCredentialsFlow,
+    JsonRpcError,
+    JsonRpcResponse,
     Message,
     OAuthFlows,
     Part,
@@ -175,6 +179,100 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def ui():
     """Serve the chat UI."""
     return FileResponse("static/index.html")
+
+
+@app.post("/")
+async def jsonrpc_endpoint(request: Request):
+    """
+    A2A JSON-RPC 2.0 binding (POST /).
+
+    Gemini Enterprise calls this endpoint by default.  All JSON-RPC methods
+    are dispatched here; currently supported:
+
+        message/send  → same handler as POST /message:send
+        tasks/get     → not yet persisted; returns method-not-found
+        tasks/cancel  → not yet persisted; returns method-not-found
+    """
+    # ── Parse JSON-RPC envelope ───────────────────────────────────────
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None,
+             "error": {"code": -32700, "message": "Parse error"}}
+        )
+
+    rpc_id = body.get("id")
+    method  = body.get("method", "")
+    params  = body.get("params") or {}
+
+    if body.get("jsonrpc") != "2.0" or not method:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": rpc_id,
+             "error": {"code": -32600, "message": "Invalid Request"}}
+        )
+
+    # ── Extract bearer token from Authorization header ────────────────
+    bearer_token = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer_token = auth_header[7:]
+
+    # ── Dispatch ──────────────────────────────────────────────────────
+    if method == "message/send":
+        return await _jsonrpc_message_send(rpc_id, params, bearer_token)
+
+    # tasks/get and tasks/cancel require server-side task persistence which
+    # is not yet implemented; return a meaningful not-found rather than 405.
+    if method in ("tasks/get", "tasks/cancel", "tasks/resubscribe"):
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": rpc_id,
+             "error": {"code": -32601,
+                        "message": f"Method '{method}' is not yet implemented"}}
+        )
+
+    return JSONResponse(
+        {"jsonrpc": "2.0", "id": rpc_id,
+         "error": {"code": -32601, "message": f"Method not found: {method}"}}
+    )
+
+
+async def _jsonrpc_message_send(
+    rpc_id: str | int | None,
+    params: dict,
+    bearer_token: str,
+) -> JSONResponse:
+    """Handle the JSON-RPC message/send method and wrap result in a JSON-RPC envelope."""
+    try:
+        req = SendMessageRequest(**params)
+    except Exception as exc:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": rpc_id,
+             "error": {"code": -32602, "message": f"Invalid params: {exc}"}}
+        )
+
+    # Token resolution — same logic as the HTTP+JSON send_message handler
+    octane_token = bearer_token
+    if config.API_KEY:
+        if not config.A2A_API_KEY:
+            octane_token = config.API_KEY
+            logger.info("JSON-RPC: no A2A_API_KEY set — using server API_KEY for Octane")
+        elif bearer_token == config.A2A_API_KEY:
+            octane_token = config.API_KEY
+            logger.info("JSON-RPC: admin key detected — substituting server API_KEY for Octane")
+
+    user_msg    = req.message
+    context_id  = user_msg.contextId or str(uuid.uuid4())
+    task_id     = user_msg.taskId    or str(uuid.uuid4())
+    user_text   = " ".join(p.text for p in user_msg.parts if p.text) or ""
+    logger.info("JSON-RPC message/send  id=%s  context=%s  text=%r", rpc_id, context_id, user_text)
+
+    if agent is not None:
+        result = await _handle_with_agent(task_id, context_id, user_text, octane_token)
+    else:
+        result = await _handle_with_keywords(task_id, context_id, user_text, user_msg, octane_token)
+
+    return JSONResponse({"jsonrpc": "2.0", "id": rpc_id, "result": result})
 
 
 @app.get("/auth-test")
@@ -315,7 +413,7 @@ def _build_agent_card() -> AgentCard:
             organization="OpenText",
             url="https://opentext.com",
         ),
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(streaming=False),
         securitySchemes={
             "csai_oauth": SecurityScheme(
                 type="oauth2",

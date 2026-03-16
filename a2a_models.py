@@ -1,10 +1,14 @@
 """
 Pydantic models for the Google A2A (Agent-to-Agent) protocol.
 
-Implements the HTTP+JSON binding subset needed for this PoC:
-  - AgentCard (served at /.well-known/agent-card.json)
-  - SendMessage request  (POST /message:send)
-  - Task / Artifact response envelope
+Supports both bindings:
+  HTTP+JSON binding
+    - AgentCard  (GET  /.well-known/agent-card.json)
+    - SendMessage request  (POST /message:send)
+    - Task / Artifact response envelope
+  JSON-RPC 2.0 binding
+    - JsonRpcRequest / JsonRpcResponse envelope  (POST /)
+    - method "message/send" dispatched to the same handler logic
 
 Reference: https://a2a-protocol.org/latest/specification/
 """
@@ -101,6 +105,23 @@ class Task(BaseModel):
 class TaskResponse(BaseModel):
     """Top-level A2A response envelope (HTTP+JSON binding)."""
     task: Task
+
+
+# ── JSON-RPC 2.0 Envelope ────────────────────────────────────────────
+
+class JsonRpcError(BaseModel):
+    """JSON-RPC 2.0 error object."""
+    code: int
+    message: str
+    data: Any | None = None
+
+
+class JsonRpcResponse(BaseModel):
+    """JSON-RPC 2.0 response envelope (success or error)."""
+    jsonrpc: str = "2.0"
+    id: str | int | None = None
+    result: Any | None = None
+    error: JsonRpcError | None = None
 
 
 # ── Agent Card (Discovery) ───────────────────────────────────────────
