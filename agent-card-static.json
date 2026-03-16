@@ -33,7 +33,7 @@
       "description": "Retrieve a defect raw data from Opentext SDP by its unique identifier.",
       "tags": ["Opentext", "SDP", "defect", "read"],
       "examples": [
-        "Get defect 2110",
+        "Get defect 1314",
         "Show me bug #9001",
         "Fetch defect details for 42"
       ],
@@ -71,8 +71,8 @@
       "name": "Get Comments",
       "description": "Retrieve all comments and discussion threads for a specific entity (defect, story, or feature). Use this when asked to summarize discussions, review feedback, or understand the conversation around an entity.",
       "tags": ["Opentext", "SDP", "comments", "discussion", "read"],
-      "examples": [
-        "Show comments on defect 2110",
+        "examples": [
+        "Show comments on defect 1314",
         "Get the discussion for story 55",
         "List all comments on feature 77"
       ],
@@ -85,7 +85,7 @@
       "description": "Creates a comment for the specified work item. The text parameter accepts HTML, allowing rich formatting such as bold, color, and font changes.",
       "tags": ["Opentext", "SDP", "comments", "write"],
       "examples": [
-        "Add a comment to defect 2110 saying 'Reproduced on build 5.3'",
+        "Add a comment to defect 1314 saying 'Reproduced on build 5.3'",
         "Comment on story 55: needs clarification",
         "Post a note on feature 77"
       ],
@@ -98,7 +98,7 @@
       "description": "Updates an existing comment on a work item. The text parameter accepts HTML for rich formatting.",
       "tags": ["Opentext", "SDP", "comments", "write"],
       "examples": [
-        "Update comment 99 on defect 2110 with new text",
+        "Update comment 99 on defect 1314 with new text",
         "Edit comment 12 on story 55"
       ],
       "inputModes": ["text/plain", "application/json"],

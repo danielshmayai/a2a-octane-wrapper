@@ -97,7 +97,7 @@ OAUTH2_TOKEN_URL=https://otdsauth.dev.ca.opentext.com/oauth2/token
 
 7. Try the built-in chat UI in a browser:
 
-Open http://localhost:9000 and ask e.g. `Get defect 2110`.
+Open http://localhost:9000 and ask e.g. `Get defect 1314`.
 
 8. If you need to change the Opentext SDP server or API key at runtime (without restarting), use the runtime config endpoint from the UI `⚙` or call it directly:
 

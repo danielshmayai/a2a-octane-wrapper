@@ -399,7 +399,7 @@ def test_send_message_with_token(access_token: str, label: str = "OAuth token") 
             "messageId": f"auth-test-{int(time.time())}",
             "contextId": f"auth-test-ctx-{int(time.time())}",
             "role": "ROLE_USER",
-            "parts": [{"text": "Get defect 2110"}],
+            "parts": [{"text": "Get defect 1314"}],
         },
         "configuration": {"blocking": True},
     }
