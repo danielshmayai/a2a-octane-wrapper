@@ -6,3 +6,6 @@ repos:
         entry: pytest
         language: system
         pass_filenames: false
+        # Run only unit tests (ignore E2E folder) to keep pre-commit fast and
+        # avoid requiring live services during git hooks.
+        args: ["tests", "--ignore=tests/e2e", "-q"]
