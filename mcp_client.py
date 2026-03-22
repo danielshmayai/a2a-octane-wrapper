@@ -22,7 +22,16 @@ import os
 import httpx
 from dotenv import load_dotenv
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
+try:
+    # Newer MCP SDK exposes `streamable_http_client` (preferred) alongside
+    # the deprecated `streamablehttp_client`. Import both when available.
+    from mcp.client.streamable_http import streamable_http_client, streamablehttp_client
+    _HAS_STREAMABLE_HTTP = True
+except Exception:
+    # Older SDKs only provide the deprecated `streamablehttp_client` wrapper.
+    from mcp.client.streamable_http import streamablehttp_client
+    streamable_http_client = None
+    _HAS_STREAMABLE_HTTP = False
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 import config
@@ -121,10 +130,19 @@ class OctaneMcpClient:
         # The MCP SDK changed the parameter name across versions; try a
         # few variants to remain compatible with installed package.
         _http_arg = (self._http_client if self._http_client is not None else None)
-        # Use the lower-level streamable_http_client which accepts a pre-built
-        # httpx.AsyncClient via the `http_client` parameter. This avoids
-        # compatibility problems with the deprecated wrapper.
-        ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+        # Prefer the newer `streamable_http_client` when available; otherwise
+        # fall back to the deprecated `streamablehttp_client` with a defensive
+        # TypeError-based parameter-name probe.
+        if _HAS_STREAMABLE_HTTP and streamable_http_client is not None:
+            ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+        else:
+            try:
+                ctx = streamablehttp_client(self._url, http_client=_http_arg, terminate_on_close=False)
+            except TypeError:
+                try:
+                    ctx = streamablehttp_client(self._url, client=_http_arg, terminate_on_close=False)
+                except TypeError:
+                    ctx = streamablehttp_client(self._url, terminate_on_close=False)
 
         async with ctx as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -161,7 +179,16 @@ class OctaneMcpClient:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
         _http_arg = (self._http_client if self._http_client is not None else None)
-        ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+        if _HAS_STREAMABLE_HTTP and streamable_http_client is not None:
+            ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+        else:
+            try:
+                ctx = streamablehttp_client(self._url, http_client=_http_arg, terminate_on_close=False)
+            except TypeError:
+                try:
+                    ctx = streamablehttp_client(self._url, client=_http_arg, terminate_on_close=False)
+                except TypeError:
+                    ctx = streamablehttp_client(self._url, terminate_on_close=False)
 
         async with ctx as (read, write, _):
             async with ClientSession(read, write) as session:
