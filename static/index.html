@@ -363,6 +363,10 @@
     #gemini-indicator { color: #9ca3af; font-size:13px; display:flex; align-items:center; gap:8px; margin-left:auto }
     #gemini-indicator.on { color: #6ee7b7 }
     #gemini-indicator.off { color: #fca5a5 }
+    /* MCP header indicator */
+    #mcp-indicator { color: #9ca3af; font-size:13px; display:flex; align-items:center; gap:8px; margin-left:6px }
+    #mcp-indicator.ok  { color: #6ee7b7 }
+    #mcp-indicator.err { color: #fca5a5 }
 
 
     /* Toggle switch */
@@ -423,6 +427,7 @@
   <h1>OT ADM Agent</h1>
   <span>A2A Wrapper</span>
   <div id="gemini-indicator" title="Gemini status" onclick="openSettings()" style="cursor:pointer;margin-left:12px">● Gemini: <span id="gemini-status-text">?</span></div>
+  <div id="mcp-indicator" title="MCP connectivity" onclick="openSettings()" style="cursor:pointer;margin-left:12px">● MCP: <span id="mcp-status-text">?</span></div>
   <a href="/auth-test" target="_blank" rel="noopener noreferrer" style="font-size:12px;padding:4px 12px;border-radius:8px;border:1px solid #10b981;color:#6ee7b7;text-decoration:none;white-space:nowrap;flex-shrink:0">🔐 Auth Flow Test</a>
   <button id="settings-btn" title="Opentext SDP connection settings" onclick="openSettings()">⚙</button>
 </header>
@@ -711,14 +716,92 @@
 
   // Update the header Gemini indicator from the live /config endpoint
   async function refreshStatus() {
+    // Fetch runtime config (for Gemini indicator) and MCP connectivity (for MCP indicator)
     try {
       const res = await fetch('/config', { headers: authHeaders(false) });
-      if (!res.ok) return;
-      const cfg = await res.json();
-      updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set);
+      if (res.ok) {
+        const cfg = await res.json();
+        updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set);
+      } else {
+        updateGeminiIndicator(false, false, true);
+      }
     } catch (e) {
-      // network error — set unknown state
+      // network error — set unknown Gemini state
       updateGeminiIndicator(false, false, true);
+    }
+
+    // Check MCP server connectivity by calling /tools (fast probe). Use timeout.
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const resTools = await fetch('/tools', { headers: authHeaders(false), signal: controller.signal });
+      clearTimeout(timeout);
+      await handleMcpToolsResponse(resTools);
+    } catch (e) {
+      // network error or timeout
+      updateMcpIndicator('unreachable', `Network error: ${e.name || e.message}`);
+      // Also show explanation in settings status if modal open
+      const statusEl = document.getElementById('settings-status');
+      if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
+        statusEl.textContent = 'MCP unreachable: ' + (e.message || e.name || 'network error');
+        statusEl.className = 'err';
+      }
+    }
+  }
+
+  async function handleMcpToolsResponse(res) {
+    const statusEl = document.getElementById('settings-status');
+    if (!res) return updateMcpIndicator('unreachable', 'No response');
+    let bodyText = '';
+    try { bodyText = await res.text(); } catch (_) { bodyText = ''; }
+    if (res.status === 200) {
+      // Expect JSON list of tools — success
+      updateMcpIndicator('ok', 'OK');
+      if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
+        statusEl.textContent = '✓ MCP reachable';
+        statusEl.className = 'ok';
+      }
+    } else if (res.status === 401) {
+      updateMcpIndicator('err', '401 Unauthorized');
+      if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
+        statusEl.textContent = 'MCP unauthorized (401): check API token or bearer passthrough';
+        statusEl.className = 'err';
+      }
+    } else if (res.status >= 400 && res.status < 600) {
+      // Try to parse JSON error message
+      let parsed = null;
+      try { parsed = JSON.parse(bodyText); } catch (_) { parsed = null; }
+      const reason = parsed?.message || parsed?.error || bodyText || `HTTP ${res.status}`;
+      updateMcpIndicator('err', `Error ${res.status}`);
+      if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
+        statusEl.textContent = `MCP error (${res.status}): ${reason}`;
+        statusEl.className = 'err';
+      }
+    } else {
+      updateMcpIndicator('err', `Unexpected ${res.status}`);
+      if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
+        statusEl.textContent = `Unexpected response: ${res.status}`;
+        statusEl.className = 'err';
+      }
+    }
+  }
+
+  function updateMcpIndicator(state, reason) {
+    const el = document.getElementById('mcp-indicator');
+    const text = document.getElementById('mcp-status-text');
+    if (!el || !text) return;
+    if (state === 'ok') {
+      el.classList.add('ok'); el.classList.remove('err');
+      text.textContent = 'OK';
+      el.title = 'MCP reachable — click to open settings';
+    } else if (state === 'unreachable') {
+      el.classList.remove('ok'); el.classList.add('err');
+      text.textContent = 'unreachable';
+      el.title = 'MCP unreachable: ' + (reason || 'network error') + ' — click to open settings';
+    } else {
+      el.classList.remove('ok'); el.classList.add('err');
+      text.textContent = reason || 'error';
+      el.title = 'MCP problem: ' + (reason || 'unknown') + ' — click to open settings';
     }
   }
 
