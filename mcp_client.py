@@ -15,6 +15,7 @@ Every request carries:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 import os
 
@@ -22,6 +23,7 @@ import httpx
 from dotenv import load_dotenv
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 import config
 
@@ -64,6 +66,27 @@ class OctaneMcpClient:
             logger.debug("No API_KEY configured; requests sent without Authorization header")
 
         self._timeout = float(timeout)
+        # Create a persistent httpx AsyncClient to allow connection reuse and
+        # keep-alive across MCP calls. This reduces per-call TLS handshake and
+        # connection setup latency.
+        try:
+            # Prefer an httpx.AsyncClient with HTTP/2 enabled to allow multiplexed
+            # connections and further reduce per-request latency when the server
+            # supports HTTP/2. Fall back to the MCP helper if this fails.
+            self._http_client = httpx.AsyncClient(
+                follow_redirects=True,
+                headers=self._headers,
+                timeout=httpx.Timeout(self._timeout, read=max(self._timeout, 300.0)),
+                http2=True,
+            )
+        except Exception:
+            try:
+                self._http_client = create_mcp_http_client(
+                    headers=self._headers,
+                    timeout=httpx.Timeout(self._timeout, read=max(self._timeout, 300.0)),
+                )
+            except Exception:
+                self._http_client = None
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -87,18 +110,23 @@ class OctaneMcpClient:
         arguments["sharedSpaceId"] = shared_space_id or config.DEFAULT_SHARED_SPACE_ID
         arguments["workSpaceId"] = workspace_id or config.DEFAULT_WORKSPACE_ID
 
+        start = time.monotonic()
         logger.info("MCP >>> call_tool=%s  url=%s  args=%s", tool_name, self._url, arguments)
 
         headers = dict(self._headers)
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
+        # Use the shared http client when available to reuse connections
         async with streamablehttp_client(
-            self._url, headers=headers, timeout=self._timeout
+            self._url, http_client=(self._http_client if self._http_client is not None else None), terminate_on_close=False
         ) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
+
+        elapsed = time.monotonic() - start
+        logger.info("MCP call_tool duration=%.3fs tool=%s", elapsed, tool_name)
 
         logger.info("MCP <<< call_tool=%s  isError=%s", tool_name, result.isError)
 
@@ -119,6 +147,7 @@ class OctaneMcpClient:
 
     async def list_tools(self, *, bearer_token: str | None = None) -> dict:
         """Return the list of tools the Opentext SDP MCP server exposes."""
+        start = time.monotonic()
         logger.info("MCP >>> list_tools  url=%s", self._url)
 
         headers = dict(self._headers)
@@ -126,11 +155,14 @@ class OctaneMcpClient:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
         async with streamablehttp_client(
-            self._url, headers=headers, timeout=self._timeout
+            self._url, http_client=(self._http_client if self._http_client is not None else None), terminate_on_close=False
         ) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
+
+        elapsed = time.monotonic() - start
+        logger.info("MCP list_tools duration=%.3fs", elapsed)
 
         tools = result.tools or []
         logger.info("MCP <<< list_tools  count=%d", len(tools))

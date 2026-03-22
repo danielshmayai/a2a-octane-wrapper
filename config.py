@@ -47,4 +47,8 @@ OAUTH2_TOKEN_URL: str = os.getenv(
 # Default: once per day (86400 seconds). Set env var to override.
 MCP_TOOL_POLL_INTERVAL_SECONDS: int = int(os.getenv("MCP_TOOL_POLL_INTERVAL_SECONDS", "86400"))
 # --- Timeouts ---
-MCP_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "30"))
+MCP_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "10"))
+# --- Gemini / GenAI request timeout (seconds) ---
+# Limits how long we wait for the Google GenAI client to respond when
+# pre-generating text or generating jokes. Can be overridden via env var.
+GEMINI_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("GEMINI_REQUEST_TIMEOUT_SECONDS", "10"))
