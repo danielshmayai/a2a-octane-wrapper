@@ -290,6 +290,37 @@ MCP_REQUEST_TIMEOUT_SECONDS=30
 
 ---
 
+### Developer: Git hooks (run tests before push)
+
+This repository includes a `.githooks` folder with portable git hooks and helper scripts to enable them locally. The pre-push hook runs `pytest` and will abort the push if any test fails.
+
+Enable hooks with one of the following (run from the repo root):
+
+PowerShell / Bash (both do the same):
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+Unix/macOS only: make the hook executable (optional but recommended):
+
+```bash
+chmod +x .githooks/pre-push
+```
+
+Or use the included installers:
+
+```bash
+# Bash
+./scripts/install_git_hooks.sh
+
+# PowerShell
+.\scripts\install_git_hooks.ps1
+```
+
+If you prefer not to block pushes, skip hooks for a single push with `git push --no-verify`.
+
+
 <a id="5-running-the-server"></a>
 ## 5. Running the Server
 
