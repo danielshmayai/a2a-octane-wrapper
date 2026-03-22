@@ -327,7 +327,10 @@ class GeminiAgent:
                     config=types.GenerateContentConfig(),
                 )
 
-            result = await asyncio.to_thread(_sync)
+            # Run the blocking genai call on a thread but bound by a configured timeout
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_sync), timeout=config.GEMINI_REQUEST_TIMEOUT_SECONDS
+            )
             generated = _extract_text(result).strip().strip('"').strip("'")
             if generated and "(no response" not in generated:
                 logger.info("Pre-generated comment text: %r", generated)
@@ -359,8 +362,8 @@ async def _generate_joke(topic: str = "") -> str:
                 contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
                 config=types.GenerateContentConfig(),
             )
-
-        result = await asyncio.to_thread(_sync)
+        # Run the blocking genai call on a thread but bound by a configured timeout
+        result = await asyncio.wait_for(asyncio.to_thread(_sync), timeout=config.GEMINI_REQUEST_TIMEOUT_SECONDS)
         joke = _extract_text(result).strip()
         if joke and "(no response" not in joke:
             logger.info("Generated joke (topic=%r)", topic)

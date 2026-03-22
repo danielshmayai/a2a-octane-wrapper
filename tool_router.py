@@ -327,9 +327,13 @@ async def execute_tool(
     """
     Call the Opentext SDP MCP server and wrap the result in an A2A Artifact.
     """
+    import time
+    start = time.monotonic()
     logger.info("Routing tool=%s  args=%s", tool_name, arguments)
 
     result = await mcp.call_tool(tool_name, arguments, bearer_token=bearer_token)
+    elapsed = time.monotonic() - start
+    logger.info("Tool routing duration=%.3fs tool=%s", elapsed, tool_name)
 
     # The MCP result typically has a "content" list of {type, text} items
     content_items = result.get("content", [])

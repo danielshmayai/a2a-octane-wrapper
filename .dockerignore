@@ -1,0 +1,91 @@
+# flyctl launch added from .gitignore
+# Byte-compiled / optimized / DLL files
+**\__pycache__
+**\*.py[cod]
+**\*$py.class
+
+# C extensions
+**\*.so
+
+# Virtual environments
+**\.venv
+**\.venv-*
+**\.venv-1
+**\venv
+**\env
+**\ENV
+
+# Environment variables / secrets
+**\.env
+**\.env.*
+
+# Test reports and coverage
+**\reports
+**\htmlcov
+**\coverage.xml
+**\.pytest_cache
+
+# IDEs and editors
+**\.vscode
+**\.idea
+**\*.suo
+**\*.user
+**\*.userosscache
+**\*.sln
+
+# OS files
+**\.DS_Store
+**\Thumbs.db
+
+# Distribution / packaging
+**\build
+**\dist
+**\*.egg-info
+
+# Logs
+**\*.log
+
+# Python egg cache
+**\.Python-eggs
+
+# Installer logs
+**\pip-log.txt
+# Local env / secrets
+**\.env
+**\env.local
+
+# Python virtualenvs
+**\.venv
+**\venv
+
+# Byte-compiled / cache
+**\__pycache__
+**\*.py[cod]
+**\*.pyo
+
+# Test / coverage
+**\.pytest_cache
+
+# Logs and DB
+**\*.log
+**\*.sqlite3
+
+# IDEs
+**\.idea
+**\.vscode
+
+# OS
+**\.DS_Store
+
+# TLS / keys
+**\*.pem
+**\*.key
+**\restart.ps1
+
+# flyctl launch added from .pytest_cache\.gitignore
+# Created by pytest automatically.
+.pytest_cache\**\*
+
+# flyctl launch added from .venv-1\.gitignore
+.venv-1\**\*
+fly.toml
