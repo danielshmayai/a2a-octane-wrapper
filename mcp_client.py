@@ -22,7 +22,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 import config
@@ -117,10 +117,16 @@ class OctaneMcpClient:
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
-        # Use the shared http client when available to reuse connections
-        async with streamablehttp_client(
-            self._url, http_client=(self._http_client if self._http_client is not None else None), terminate_on_close=False
-        ) as (read, write, _):
+        # Use the shared http client when available to reuse connections.
+        # The MCP SDK changed the parameter name across versions; try a
+        # few variants to remain compatible with installed package.
+        _http_arg = (self._http_client if self._http_client is not None else None)
+        # Use the lower-level streamable_http_client which accepts a pre-built
+        # httpx.AsyncClient via the `http_client` parameter. This avoids
+        # compatibility problems with the deprecated wrapper.
+        ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+
+        async with ctx as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
@@ -154,9 +160,10 @@ class OctaneMcpClient:
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
-        async with streamablehttp_client(
-            self._url, http_client=(self._http_client if self._http_client is not None else None), terminate_on_close=False
-        ) as (read, write, _):
+        _http_arg = (self._http_client if self._http_client is not None else None)
+        ctx = streamable_http_client(self._url, http_client=_http_arg, terminate_on_close=False)
+
+        async with ctx as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
