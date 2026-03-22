@@ -227,21 +227,31 @@ Custom port:
 
 ---
 
-## 5. Pre-commit Hook
+## 5. Git hooks
 
-The pre-commit hook runs `pytest` (unit tests only) before every commit.
-The E2E and integration tests are **excluded** from automatic runs because they require API keys / live servers.
+This repository includes a `.githooks` directory with hooks and helper scripts. By default the project provides a **pre-push** hook that runs the full `pytest` suite and aborts the push if tests fail. E2E/integration tests that require API keys or live servers will still run under the pre-push hook — configure `GEMINI_API_KEY` or skip as needed.
 
-To run the hook manually:
+Enable the hooks (run from repo root):
 
-```bash
-pre-commit run --all-files
+PowerShell / Bash:
+
+```powershell
+git config core.hooksPath .githooks
 ```
 
-To skip the hook in an emergency (not recommended):
+Or run the installer scripts:
 
 ```bash
-git commit --no-verify -m "your message"
+./scripts/install_git_hooks.sh
+# or on PowerShell
+.\scripts\install_git_hooks.ps1
+```
+
+To skip hooks for a single commit or push (not recommended):
+
+```bash
+git commit --no-verify -m "message"
+git push --no-verify
 ```
 
 ---
