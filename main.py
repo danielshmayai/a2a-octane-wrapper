@@ -454,12 +454,12 @@ async def sim_token():
     return JSONResponse({"token": config.API_KEY})
 
 
-@app.post("/discover-tools", dependencies=[Depends(_verify_token)])
+@app.post("/discover-tools")
 async def discover_tools():
     """Manual trigger to discover MCP tools and refresh the router/agent.
 
-    Useful when you add a tool to Opentext SDP and want the wrapper to pick it up
-    immediately without restarting.
+    No auth required — this is a read-only cache refresh (calls MCP list_tools and
+    updates internal state). Safe to expose publicly; no data is written or returned.
     """
     global mcp, agent
     try:

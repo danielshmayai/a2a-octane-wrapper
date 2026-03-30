@@ -480,12 +480,13 @@
     <h2>OT ADM Agent</h2>
     <p>Ask me about defects, stories, features, comments, or your work items in Opentext SDP. Powered by Gemini AI.</p>
     <div class="suggestion-chips">
-      <div class="chip" onclick="sendChip(this)">Get defect 1314</div>
+      <div class="chip" onclick="sendChip(this)">What tools does my SDP Octane expose?</div>
+      <div class="chip" onclick="sendChip(this)">Show me defect 1314</div>
       <div class="chip" onclick="sendChip(this)">Show my work items</div>
-      <div class="chip" onclick="sendChip(this)">Get comments on defect 1314</div>
-      <div class="chip" onclick="sendChip(this)">Get story 1234</div>
-      <div class="chip" onclick="sendChip(this)">Get feature 500</div>
-      <div class="chip" onclick="sendChip(this)">Add comment to defect 1314 saying "Under investigation"</div>
+      <div class="chip" onclick="sendChip(this)">List requirements not in Done phase assigned to Daniel's team</div>
+      <div class="chip" onclick="sendChip(this)">Show me all open defects with high severity</div>
+      <div class="chip" onclick="sendChip(this)">Add a comment to defect 1314 saying "Under investigation"</div>
+      <div class="chip" onclick="listMcpTools(this)" title="Fetch the live tool list from the MCP server">List available MCP tools</div>
     </div>
     <div class="agentspace-note">
       <strong>Also available in Google AgentSpace:</strong> Register this agent at
@@ -524,6 +525,7 @@
   const chatWindow = document.getElementById('chat-window');
   const emptyState = document.getElementById('empty-state');
   const msgInput = document.getElementById('msg-input');
+  let _mcpWasOnline = false; // tracks MCP online state for auto-discovery trigger
   const sendBtn = document.getElementById('send-btn');
   let msgCounter = 1;
 
@@ -552,6 +554,44 @@
     document.getElementById('input-form').dispatchEvent(new Event('submit'));
   }
 
+  async function listMcpTools(chip) {
+    if (emptyState) emptyState.remove();
+    appendMessage('user', chip.textContent);
+
+    const loadingId = 'loading-' + Date.now();
+    appendMessage('agent', 'Fetching tools from MCP server…', { id: loadingId, loading: true });
+
+    try {
+      const resp = await fetch('/tools');
+      const data = await resp.json();
+      if (!resp.ok) {
+        document.getElementById(loadingId)?.remove();
+        appendMessage('agent', `MCP server error (${resp.status}): ${data.detail || JSON.stringify(data)}`, { error: true });
+        return;
+      }
+      const tools = data.tools || [];
+
+      let text;
+      if (tools.length === 0) {
+        text = 'No tools returned from the MCP server.';
+      } else {
+        const lines = tools.map(t => {
+          const params = Object.keys(t.inputSchema?.properties || {})
+            .filter(p => p !== 'sharedSpaceId' && p !== 'workSpaceId')
+            .join(', ') || '—';
+          return `**${t.name}**\n${t.description || ''}\nParams: ${params}`;
+        });
+        text = `${tools.length} tool${tools.length !== 1 ? 's' : ''} available:\n\n` + lines.join('\n\n');
+      }
+
+      document.getElementById(loadingId)?.remove();
+      appendMessage('agent', text);
+    } catch (err) {
+      document.getElementById(loadingId)?.remove();
+      appendMessage('agent', `Failed to fetch MCP tools: ${err.message}`, { error: true });
+    }
+  }
+
   function appendMessage(role, text, extra = {}) {
     if (emptyState) emptyState.remove();
 
@@ -568,7 +608,7 @@
 
     // Try to pretty-print JSON content
     if (role === 'agent' && !extra.loading && !extra.error) {
-      bubble.innerHTML = renderContent(text);
+      bubble.innerHTML = renderText(text);
     } else {
       bubble.textContent = text;
     }
@@ -598,7 +638,7 @@
   }
 
   function renderArtifact(artifact) {
-    // Render a collapsible raw-data block
+    // Render a collapsible block showing the MCP request and its result
     const parts = artifact.parts || [];
     let content = '';
     for (const p of parts) {
@@ -610,8 +650,27 @@
     }
     if (!content) return '';
     const name = artifact.name || 'Raw data';
+
+    // Build request section when metadata carries tool + arguments
+    let requestHtml = '';
+    const meta = artifact.metadata;
+    if (meta && meta.tool) {
+      const args = meta.arguments || {};
+      // Exclude auto-injected workspace params — not useful to display
+      const displayArgs = Object.fromEntries(
+        Object.entries(args).filter(([k]) => k !== 'sharedSpaceId' && k !== 'workSpaceId')
+      );
+      requestHtml = `<div style="margin-bottom:6px">
+  <span style="color:#9ca3af;font-size:11px;text-transform:uppercase;letter-spacing:.05em">Request — ${escapeHtml(meta.tool)}</span>
+  <pre style="margin-top:4px">${escapeHtml(JSON.stringify(displayArgs, null, 2))}</pre>
+</div>
+<div style="border-top:1px solid #374151;margin-bottom:6px"></div>
+<span style="color:#9ca3af;font-size:11px;text-transform:uppercase;letter-spacing:.05em">Response</span>`;
+    }
+
     return `<details style="margin-top:10px">
   <summary style="cursor:pointer;color:#6b7280;font-size:12px">${escapeHtml(name)}</summary>
+  <div style="padding-top:8px">${requestHtml}</div>
   <pre>${escapeHtml(content)}</pre>
 </details>`;
   }
@@ -756,10 +815,26 @@
     try { bodyText = await res.text(); } catch (_) { bodyText = ''; }
     if (res.status === 200) {
       // Expect JSON list of tools — success
+      const wasOffline = !_mcpWasOnline;
+      _mcpWasOnline = true;
       updateMcpIndicator('ok', 'OK');
       if (statusEl && document.getElementById('settings-overlay').classList.contains('open')) {
         statusEl.textContent = '✓ MCP reachable';
         statusEl.className = 'ok';
+      }
+      // Auto-refresh backend tool registry whenever MCP comes (back) online
+      if (wasOffline) {
+        try {
+          const dr = await fetch('/discover-tools', { method: 'POST', headers: authHeaders(true) });
+          if (dr.ok) {
+            const dj = await dr.json();
+            console.log('[discover-tools] auto-refresh ok, tools:', dj.count);
+          } else {
+            console.warn('[discover-tools] auto-refresh failed:', dr.status, await dr.text());
+          }
+        } catch (e) {
+          console.warn('[discover-tools] auto-refresh error:', e.message);
+        }
       }
     } else if (res.status === 401) {
       updateMcpIndicator('err', '401 Unauthorized');
@@ -795,6 +870,7 @@
       text.textContent = 'OK';
       el.title = 'MCP reachable — click to open settings';
     } else if (state === 'unreachable') {
+      _mcpWasOnline = false;
       el.classList.remove('ok'); el.classList.add('err');
       text.textContent = 'unreachable';
       el.title = 'MCP unreachable: ' + (reason || 'network error') + ' — click to open settings';

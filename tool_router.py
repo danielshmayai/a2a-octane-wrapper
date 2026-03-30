@@ -30,86 +30,9 @@ logger = logging.getLogger(__name__)
 
 # ── Supported tool definitions (used by the router and the AgentCard) ── Fallback behavior: When the Opentext SDP MCP server is unreachable
 
+# Seed registry — only local-only tools that are never served by the MCP server.
+# MCP tools are populated at startup (and on refresh) by populate_registry_from_mcp().
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
-    "get_defect": {
-        "description": "Retrieve a defect raw data from Opentext SDP by its unique identifier.",
-        "example_prompts": [
-            "Get defect 1314",
-            "Show me bug #9001",
-            "Fetch defect details for 42",
-        ],
-        "default_arguments": {"entityId": None},
-        "required": ["entityId"],
-    },
-    "get_story": {
-        "description": "Retrieve a story raw data from Opentext SDP by its unique identifier.",
-        "example_prompts": [
-            "Get story 1234",
-            "Show me user story 55",
-        ],
-        "default_arguments": {"entityId": None},
-        "required": ["entityId"],
-    },
-    "get_feature": {
-        "description": "Retrieve raw data for a feature from Opentext SDP by its unique identifier.",
-        "example_prompts": [
-            "Get feature 77",
-            "Show me feature 200",
-        ],
-        "default_arguments": {"entityId": None},
-        "required": ["entityId"],
-    },
-    "get_comments": {
-        "description": (
-            "Retrieve all comments and discussion threads for a specific entity "
-            "(defect, story, or feature)."
-        ),
-            "example_prompts": [
-            "Show comments on defect 1314",
-            "Get the discussion for story 55",
-            "List all comments on feature 77",
-        ],
-        "default_arguments": {"entityId": None, "entityType": None},
-        "required": ["entityId", "entityType"],
-    },
-    "create_comment": {
-        "description": (
-            "Creates a comment for the specified work item. "
-            "The text parameter accepts HTML for rich formatting."
-        ),
-        "example_prompts": [
-            "Add a comment to defect 1314 saying 'Reproduced on build 5.3'",
-            "Comment on story 55: needs clarification",
-        ],
-        "default_arguments": {"entityId": None, "entityType": None, "text": ""},
-        "required": ["entityId", "entityType", "text"],
-    },
-    "update_comment": {
-        "description": (
-            "Updates an existing comment on a work item. "
-            "The text parameter accepts HTML for rich formatting."
-        ),
-        "example_prompts": [
-            "Update comment 99 on defect 1314 with new text",
-            "Edit comment 12 on story 55",
-        ],
-        "default_arguments": {"commentId": None, "entityId": None, "entityType": None, "text": ""},
-        "required": ["commentId", "entityId", "entityType", "text"],
-    },
-    "fetch_My_Work_Items": {
-        "description": (
-            "Fetches the current user's assigned work items (stories, defects, quality stories) "
-            "including metadata like ID, name, phase, priority, story points, sprint, owner, severity. "
-            "Results are ordered by user priority/rank."
-        ),
-        "example_prompts": [
-            "What are my work items?",
-            "Show my assigned defects and stories",
-            "Fetch my backlog",
-        ],
-        "default_arguments": {},
-        "required": [],
-    },
     "tell_joke": {
         "description": (
             "Tell a funny, light-hearted joke. Use this whenever the user asks for a joke, "
@@ -118,7 +41,6 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
         "example_prompts": [
             "Tell me a joke",
             "Make me laugh",
-            "Say something funny about defects",
         ],
         "default_arguments": {"topic": ""},
         "required": [],
@@ -135,17 +57,19 @@ _EXCLUDED_MCP_PARAMS: frozenset[str] = frozenset({"sharedSpaceId", "workSpaceId"
 
 def populate_registry_from_mcp(tools: list[dict]) -> None:
     """
-    Replace TOOL_REGISTRY with live tool definitions fetched from the MCP server.
+    Update TOOL_REGISTRY in-place with live tool definitions from the MCP server.
 
-    Falls back silently — if 'tools' is empty the existing built-in registry
-    is left intact so the keyword router keeps working.
+    Mutates the existing dict object (clear + update) so all importers that hold a
+    reference via `from tool_router import TOOL_REGISTRY` see the new contents
+    without needing to re-import.  Reassigning the name (TOOL_REGISTRY = {...})
+    would silently leave stale references in other modules.
+
+    Falls back silently if tools list is empty — built-in registry stays intact.
     """
-    global TOOL_REGISTRY
     if not tools:
         return
-    # Preserve local-only tools that are never served by the MCP server
     local_tools = {k: v for k, v in TOOL_REGISTRY.items() if k in _LOCAL_ONLY_TOOLS}
-    TOOL_REGISTRY = {
+    new_entries = {
         t["name"]: {
             "description": t.get("description", ""),
             "example_prompts": [],
@@ -158,48 +82,36 @@ def populate_registry_from_mcp(tools: list[dict]) -> None:
                 r for r in t.get("inputSchema", {}).get("required", [])
                 if r not in _EXCLUDED_MCP_PARAMS
             ],
+            # Full property schemas (with types) needed for dynamic ADK tool generation
+            "inputSchema": {
+                k: v
+                for k, v in t.get("inputSchema", {}).get("properties", {}).items()
+                if k not in _EXCLUDED_MCP_PARAMS
+            },
         }
         for t in tools
     }
-    TOOL_REGISTRY.update(local_tools)
+    new_entries.update(local_tools)
+    TOOL_REGISTRY.clear()
+    TOOL_REGISTRY.update(new_entries)
     logger.info("TOOL_REGISTRY: loaded %d tools from MCP server (+%d local)", len(TOOL_REGISTRY) - len(local_tools), len(local_tools))
 
 
-# ── Keyword-based intent matching (lightweight, no LLM needed) ─────
-
-# Entity-type keywords used for comment/get routing
-_ENTITY_TYPE_KEYWORDS: dict[str, str] = {
-    "defect": "defect",
-    "bug": "defect",
-    "story": "story",
-    "user story": "story",
-    "feature": "feature",
-}
+# ── Keyword-based intent matching (lightweight fallback, no LLM needed) ────
+#
+# This router is only used when no Gemini API key is configured.
+# With Gemini active, all intent resolution is handled by the LLM agent.
+# Keywords map to tool names as discovered from the MCP server — update these
+# when the MCP server's tool API changes.
 
 _INTENT_KEYWORDS: dict[str, list[str]] = {
-    "fetch_My_Work_Items": [
-        "my work", "my items", "my defects", "my stories", "my backlog",
-        "assigned to me", "my tasks", "my features", "fetch my",
+    "get_entities": [
+        "list", "show", "get all", "find", "search", "filter",
+        "defects", "stories", "features", "requirements", "tasks",
+        "my work", "my items", "assigned to me", "backlog",
     ],
-    "get_comments": [
-        "comments", "comment", "discussion", "discussions", "thread",
-        "feedback", "notes",
-    ],
-    "create_comment": [
-        "add comment", "create comment", "post comment", "write comment",
-        "add a comment", "post a comment", "comment saying", "comment:",
-    ],
-    "update_comment": [
-        "update comment", "edit comment", "change comment", "modify comment",
-    ],
-    "get_defect": [
-        "defect", "bug",
-    ],
-    "get_story": [
-        "story", "user story",
-    ],
-    "get_feature": [
-        "feature",
+    "get_entity": [
+        "get", "fetch", "show me", "details", "info about",
     ],
 }
 
@@ -359,4 +271,5 @@ async def execute_tool(
         name=f"{tool_name}_result",
         description=f"Result from Opentext SDP tool: {tool_name}",
         parts=parts,
+        metadata={"tool": tool_name, "arguments": arguments},
     )

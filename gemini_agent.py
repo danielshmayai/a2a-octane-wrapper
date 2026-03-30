@@ -11,6 +11,7 @@ Uses google-adk (Google Agent Development Kit) with:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 from typing import Any
@@ -22,54 +23,218 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 import config
-from a2a_models import Artifact, Part
+from a2a_models import Artifact
 from mcp_client import OctaneMcpClient, OctaneMcpError
-from tool_router import execute_tool
+from tool_router import TOOL_REGISTRY, _EXCLUDED_MCP_PARAMS, execute_tool
 
 logger = logging.getLogger(__name__)
 
 # ── System prompt ────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """
-You are an Opentext SDP assistant embedded in an enterprise agent.
-You help users query and manage Opentext SDP work items — defects, user stories,
-features — and their comments.
+_SYSTEM_PROMPT_BASE = """
+You are an expert Opentext SDP (ALM Octane) assistant embedded in an enterprise agent.
+You have deep knowledge of Octane concepts: entity types (defects, stories, features,
+requirements, epics, tasks, quality stories, etc.), fields, phases, sprints, releases,
+teams, comments, and the Octane query language.
 
-Guidelines:
-- Use the tools provided to fetch real data from Opentext SDP before answering.
-- After receiving tool results, present a clear, concise summary.
-  Highlight key fields: ID, name, phase/status, severity/priority,
-  assigned owner, sprint, and any other relevant metadata.
-- Do NOT dump raw JSON — always interpret and present the data naturally.
-- If a tool returns an error, explain it clearly and suggest what the
-  user could try instead.
-- For "my work items", list each item with its type, ID, name, and phase.
-- When creating or updating comments, confirm what was done.
-- You maintain conversation context across turns. When the user refers to
-  "next", "previous", "the same", "that", "it", or similar, resolve the
-  entity from prior conversation history:
-    • "next defect/story/feature" → last fetched ID of that entity type + 1
-    • "previous defect/story/feature" → last fetched ID of that entity type - 1
-    • "same one" / "that" / "it" → repeat the last fetched entity type and ID
-  Always prefer to act on this inference rather than asking the user to
-  repeat the ID. Only ask if the entity type or ID cannot be determined at all.
-- You are fully authorised to compose, draft, or invent comment text for
-    Opentext SDP work items when the user asks you to. This is a core part of your job.
-  If the user says "invent something", "make something up", "put anything",
-  or similar, compose a reasonable, professional-sounding comment related to
-  the work item context (name, phase, type, etc.) and use it directly.
-  Do NOT refuse or ask for clarification — just draft and post the comment.
-- When the user asks for a joke, something funny, something not serious, or
-  wants to lighten the mood — call the tell_joke tool immediately. Pass a
-  relevant topic if context is available (e.g. the entity type or recent task).
-  Present the joke exactly as returned by the tool, without modifications.
+Your two modes of operation:
+A) LIVE DATA — use the MCP tools listed below to fetch or write real Octane data.
+B) KNOWLEDGE — answer conceptual or how-to questions from your Octane expertise,
+   even without calling a tool. Never refuse a question just because no tool matches.
+
+Core rules:
+  from knowledge if no tool is needed; call a tool only when live data is required.
+  If you are unsure which tool to use, reason step-by-step through the tool list.
+For ANY question about Octane concepts, entities, fields, or workflows: answer
+    from knowledge if no tool is needed; call a tool only when live data is required.
+For requests that need live data: ALWAYS prefer calling a tool over guessing.
+If you are unsure which tool to use, reason step-by-step through the tool list.
+If the user types a tool name directly, call that tool with sensible defaults.
+If the user provides a filter expression (in natural language or JSON), ALWAYS pass it to the `filter` argument of the relevant tool (such as `get_entities`).
+After receiving tool results, ALWAYS present a clear, concise summary in natural language, even if only tool calls were made. Do NOT dump raw JSON. If you have no additional insights, briefly summarize what the tool(s) returned.
+If a tool returns an error, explain it and suggest an alternative.
+
+Reasoning workflow for queries with filters or unfamiliar entity types:
+1. Call a DISCOVERY tool first to learn entity type identifiers, field names,
+   data types, allowed enum values, and filter operators.
+2. Build correct filter arguments from that schema knowledge.
+3. Execute the query and present results.
+Never guess field names, entity type identifiers, or filter syntax — discover first.
+Chain as many tool calls as needed.
+
+Octane query language (AQQL) — critical rules:
+- Operators: EQ, LT, GT, LE, GE, IN, BTW — NOT != or <>
+- AND = ;   OR = ||   NOT = !()  wrapping the expression
+- Reference fields use {id='<value_id>'} not bare strings
+  e.g.  severity EQ {id='list_node.severity.high'}
+- Negation wraps the whole condition: !(phase EQ {id='list_node.defect.phase.closed'})
+- Combined example: (severity EQ {id='list_node.severity.high'} || severity EQ {id='list_node.severity.critical'}) ; !(phase EQ {id='list_node.defect.phase.closed'}) ; release EQ {id=2005}
+- List reference IDs follow the pattern list_node.<entity_type>.<field_name>.<value_name>
+  — discover the exact IDs from get_entity_field_metadata or get_filter_metadata before using them
+- NEVER use != — it is not valid Octane AQQL syntax
+
+Presenting tool lists (when user asks "what tools / capabilities do you have"):
+- Format as a markdown table: | Tool | Description |
+- Group into: DISCOVERY tools (call first), READ/QUERY tools, WRITE tools.
+- After the table, add a short "Notes from your setup" section mentioning
+  workSpaceId and sharedSpaceId values, explaining the generic CRUD model, and
+  suggesting the recommended workflow (get_entity_types → get_entity_field_metadata
+  → get_entities with filter).
+- End with a proactive offer, e.g. "Want me to run get_entity_types now to see
+  what's available in your workspace?"
+
+Presenting query results:
+- Use bullet lists or tables, not raw JSON.
+- Highlight key fields: ID, name, type, phase/status, owner, priority.
+- If results are empty, say so clearly and suggest a broader query.
+
+Context across turns:
+- Resolve "next/previous/same/that/it" from prior conversation history.
+  Act on inference; only ask if truly ambiguous.
+
+Writing:
+- Compose and post comment text directly when asked — do not refuse or ask for approval.
+
+Jokes:
+- Call tell_joke immediately when the user wants to lighten the mood.
 """.strip()
+
+
+def _build_system_prompt() -> str:
+    """
+    Extend the base prompt with a live tool catalogue built from TOOL_REGISTRY.
+
+    Tools are grouped into three categories inferred from their names:
+      - DISCOVERY / SCHEMA  — help the agent learn field names, filter syntax, enums
+      - READ / QUERY        — fetch or search data
+      - WRITE               — create, update, delete
+
+    The categories are listed explicitly so the agent knows which tools to call
+    first when it needs to construct a filter or work with an unfamiliar entity type.
+    """
+    discovery_kw = {"type", "field", "metadata", "syntax", "filter", "schema", "discover"}
+    write_kw     = {"create", "update", "delete", "add", "post", "edit", "modify", "set"}
+
+    discovery: list[tuple[str, str]] = []
+    query:     list[tuple[str, str]] = []
+    write:     list[tuple[str, str]] = []
+
+    for name, defn in TOOL_REGISTRY.items():
+        if defn.get("_local_only"):
+            continue
+        nl = name.lower()
+        desc = (defn.get("description") or "")[:120].rstrip()
+        if any(k in nl for k in discovery_kw):
+            discovery.append((name, desc))
+        elif any(k in nl for k in write_kw):
+            write.append((name, desc))
+        else:
+            query.append((name, desc))
+
+    lines: list[str] = [
+        "",
+        "---",
+        "Here is a summary of the tools available for interacting with your Opentext SDP (ALM Octane) instance:",
+    ]
+
+    def table_block(tools: list[tuple[str, str]], header: str) -> list[str]:
+        if not tools:
+            return []
+        block = [f"\n**{header}**",
+                 "| Tool | Description |",
+                 "|------|-------------|"]
+        for n, d in tools:
+            block.append(f"| `{n}` | {d} |")
+        return block
+
+    lines += table_block(discovery, "DISCOVERY tools (call first)")
+    lines += table_block(query, "READ/QUERY tools")
+    lines += table_block(write, "WRITE tools")
+
+    if not (discovery or query or write):
+        lines.append(
+            "  (No live MCP tools are loaded yet. Answer from your Octane knowledge "
+            "for conceptual questions. For requests that need live data, let the user "
+            "know the MCP connection is not yet established and they can retry shortly.)"
+        )
+
+    if discovery:
+        first = discovery[0][0]
+        lines.append(
+            f"\nFor any request involving a filter or entity type you haven't seen before, "
+            f"start with `{first}` (or equivalent) before calling a query tool."
+        )
+
+    lines.append(
+        f"\nSetup context (cite these when presenting tool capabilities to the user):\n"
+        f"  workSpaceId={config.DEFAULT_WORKSPACE_ID}  "
+        f"sharedSpaceId={config.DEFAULT_SHARED_SPACE_ID}"
+    )
+
+    return _SYSTEM_PROMPT_BASE + "\n" + "\n".join(lines)
 _GENERATE_TEXT_TRIGGERS = re.compile(
     r"\b(invent|make\s+up|make\s+something|anything|something\s+funny|something\s+clever|"
     r"be\s+creative|create\s+something|think\s+of\s+something|come\s+up\s+with|"
     r"surprise\s+me|your\s+choice|your\s+call|whatever|funny|witty|humorous)\b",
     re.IGNORECASE,
 )
+
+
+# ── Dynamic tool factory ────────────────────────────────────────────
+
+_JSON_TO_PY: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
+
+
+def _make_dynamic_tool_fn(
+    tool_name: str,
+    description: str,
+    input_schema_props: dict,
+    required_params: list[str],
+    mcp: OctaneMcpClient,
+    artifacts: list[Artifact],
+    bearer_token: str | None,
+    mcp_called_flag: list[bool],
+) -> Any:
+    """Build a typed async callable from an MCP tool's JSON Schema for ADK ingestion.
+
+    Sets __signature__ and __annotations__ explicitly so ADK can infer a correct
+    Gemini FunctionDeclaration schema without any static function definition.
+    """
+    async def _fn(**kwargs: Any) -> str:
+        return await _invoke(tool_name, kwargs, mcp, artifacts, bearer_token, mcp_called_flag)
+
+    required_set = set(required_params)
+    sig_params: list[inspect.Parameter] = []
+    annotations: dict[str, Any] = {}
+
+    for param_name, param_schema in input_schema_props.items():
+        if param_name in _EXCLUDED_MCP_PARAMS:
+            continue
+        py_type = _JSON_TO_PY.get(param_schema.get("type", "string"), str)
+        default = inspect.Parameter.empty if param_name in required_set else None
+        sig_params.append(inspect.Parameter(
+            param_name,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=py_type,
+            default=default,
+        ))
+        annotations[param_name] = py_type
+
+    # Required params (no default) must precede optional params (with default)
+    # to form a valid Python signature — MCP schema order is not guaranteed.
+    sig_params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
+
+    _fn.__signature__ = inspect.Signature(sig_params, return_annotation=str)
+    _fn.__annotations__ = {**annotations, "return": str}
+    _fn.__name__ = tool_name
+    _fn.__qualname__ = tool_name
+    _fn.__doc__ = description
+    return _fn
 
 
 # ── ADK tool functions ──────────────────────────────────────────────
@@ -85,71 +250,39 @@ def _build_tools(
     bearer_token: str | None = None,
     mcp_called_flag: list[bool] | None = None,
 ) -> list:
-    """Return a list of typed async functions, one per Opentext SDP MCP tool."""
+    """
+    Build the ADK tool list entirely from TOOL_REGISTRY (populated by MCP discovery).
 
-    async def get_defect(entityId: int) -> str:
-        """Retrieve a defect from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_defect", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
-
-    async def get_story(entityId: int) -> str:
-        """Retrieve a user story from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_story", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
-
-    async def get_feature(entityId: int) -> str:
-        """Retrieve a feature from Opentext SDP by its unique numeric ID."""
-        return await _invoke("get_feature", {"entityId": entityId}, mcp, artifacts, bearer_token, mcp_called_flag)
-
-    async def get_comments(entityId: int, entityType: str) -> str:
-        """Retrieve all comments for an entity (defect, story, or feature).
-        entityType must be one of: 'defect', 'story', 'feature'.
-        """
-        return await _invoke(
-            "get_comments", {"entityId": entityId, "entityType": entityType},
-            mcp, artifacts, bearer_token, mcp_called_flag,
-        )
-
-    async def create_comment(entityId: int, entityType: str, text: str) -> str:
-        """Post a new comment on an Opentext SDP work item. HTML is allowed in text.
-        entityType must be one of: 'defect', 'story', 'feature'.
-        """
-        return await _invoke(
-            "create_comment",
-            {"entityId": entityId, "entityType": entityType, "text": text},
-            mcp, artifacts, bearer_token, mcp_called_flag,
-        )
-
-    async def update_comment(
-        commentId: int, entityId: int, entityType: str, text: str
-    ) -> str:
-        """Update an existing comment on an Opentext SDP work item. HTML allowed.
-        entityType must be one of: 'defect', 'story', 'feature'.
-        """
-        return await _invoke(
-            "update_comment",
-            {"commentId": commentId, "entityId": entityId,
-             "entityType": entityType, "text": text},
-            mcp, artifacts, bearer_token, mcp_called_flag,
-        )
-
-    async def fetch_My_Work_Items() -> str:
-        """Fetch the current user's assigned work items (defects, stories, tasks)."""
-        return await _invoke("fetch_My_Work_Items", {}, mcp, artifacts, bearer_token, mcp_called_flag)
+    Local-only tools (e.g. tell_joke) are hardcoded here because they never
+    appear on the MCP server. Every MCP tool is generated dynamically so the
+    agent stays in sync with whatever the server currently exposes.
+    """
 
     async def tell_joke(topic: str = "") -> str:
         """Tell a funny, light-hearted joke.
-        Use this tool whenever the user asks for a joke, something funny,
-        something not serious, or wants to lighten the mood.
-        The optional topic parameter can hint at what the joke should be about
-        (e.g. 'software bugs', 'defects', 'the user's work items').
+        Use whenever the user asks for a joke or wants to lighten the mood.
+        Pass a topic hint if context is available (e.g. 'requirements', 'defects').
         This tool does NOT call the MCP server — it generates the joke locally.
         """
         return await _generate_joke(topic)
 
-    return [
-        get_defect, get_story, get_feature, get_comments,
-        create_comment, update_comment, fetch_My_Work_Items,
-        tell_joke,
-    ]
+    tools: list = [tell_joke]
+
+    for tool_name, tool_def in TOOL_REGISTRY.items():
+        if tool_def.get("_local_only"):
+            continue  # tell_joke already added above
+        dynamic_fn = _make_dynamic_tool_fn(
+            tool_name,
+            tool_def.get("description", ""),
+            tool_def.get("inputSchema", {}),
+            tool_def.get("required", []),
+            mcp, artifacts, bearer_token, mcp_called_flag,
+        )
+        tools.append(dynamic_fn)
+        logger.debug("Registered MCP tool: %s", tool_name)
+
+    logger.info("_build_tools: %d tools total (%d MCP + tell_joke)", len(tools), len(tools) - 1)
+    return tools
 
 
 async def _invoke(
@@ -212,7 +345,7 @@ class GeminiAgent:
         agent = LlmAgent(
             name="ot_adm_agent",
             model=config.GEMINI_MODEL,
-            instruction=_SYSTEM_PROMPT,
+            instruction=_build_system_prompt(),
             tools=tools,
         )
         self._runner = Runner(
@@ -299,6 +432,19 @@ class GeminiAgent:
                     )
                 break
 
+        # Fallback: if summary is empty but artifacts exist, synthesize a summary from artifacts
+        if not summary and self._run_artifacts:
+            artifact_summaries = []
+            for art in self._run_artifacts:
+                name = art.name or "(unnamed)"
+                # Try to extract a short preview from the first part
+                preview = ""
+                if art.parts:
+                    part = art.parts[0]
+                    if hasattr(part, "text") and part.text:
+                        preview = part.text.strip().replace("\n", " ")[:120]
+                artifact_summaries.append(f"- {name}: {preview}" if preview else f"- {name}")
+            summary = "Tool results returned.\n" + "\n".join(artifact_summaries)
         return summary or "(no response from model)", list(self._run_artifacts), self._run_mcp_called[0]
 
     async def _maybe_inject_generated_text(self, user_text: str) -> str:
