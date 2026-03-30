@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write(.env*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'BLOCKED: Cannot write to .env files — contains API keys and secrets' && exit 1"
+          }
+        ]
+      }
+    ]
+  }
+}

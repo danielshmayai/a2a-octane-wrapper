@@ -64,22 +64,33 @@ async def test_handle_with_agent_no_mcp(monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_with_keywords_sets_metadata(monkeypatch):
     import main
+    import tool_router
 
-    # Build a Message with a Part that declares a tool
-    part = a2a_models.Part(data={"tool": "get_defect"})
-    user_msg = a2a_models.Message(role="ROLE_USER", parts=[part])
+    # Temporarily register a tool so the keyword router can route to it.
+    # We use get_entities (the current generic MCP tool name) and supply it
+    # via the structured data part so resolve_intent is bypassed entirely.
+    tool_router.TOOL_REGISTRY["get_entities"] = {
+        "description": "test stub",
+        "example_prompts": [],
+        "default_arguments": {},
+        "required": [],
+    }
+    try:
+        part = a2a_models.Part(data={"tool": "get_entities"})
+        user_msg = a2a_models.Message(role="ROLE_USER", parts=[part])
 
-    # Monkeypatch execute_tool to return an Artifact
-    async def fake_execute_tool(tool_name, arguments, mcp, bearer_token=None):
-        return a2a_models.Artifact(parts=[a2a_models.Part(text="defect data")])
+        async def fake_execute_tool(tool_name, arguments, mcp, bearer_token=None):
+            return a2a_models.Artifact(parts=[a2a_models.Part(text="entity data")])
 
-    monkeypatch.setattr(main, 'execute_tool', fake_execute_tool)
+        monkeypatch.setattr(main, 'execute_tool', fake_execute_tool)
 
-    res = await main._handle_with_keywords('tid-kw', 'ctx-kw', 'ignored', user_msg, 'the-token')
-    task = res['task']
-    assert task['metadata']['mcp_called'] is True
-    assert task['metadata']['auth_injected'] is True
-    assert task['artifacts'] is not None
+        res = await main._handle_with_keywords('tid-kw', 'ctx-kw', 'ignored', user_msg, 'the-token')
+        task = res['task']
+        assert task['metadata']['mcp_called'] is True
+        assert task['metadata']['auth_injected'] is True
+        assert task['artifacts'] is not None
+    finally:
+        tool_router.TOOL_REGISTRY.pop("get_entities", None)
 
 
 # ── JSON-RPC endpoint tests ─────────────────────────────────────────
@@ -94,9 +105,8 @@ async def test_jsonrpc_message_send_success(monkeypatch):
         artifact = a2a_models.Artifact(parts=[a2a_models.Part(text="rpc result")])
         return "rpc summary", [artifact], True
 
-    monkeypatch.setattr(main, 'agent', types.SimpleNamespace(run=fake_run))
-
     with TestClient(main.app) as client:
+        monkeypatch.setattr(main, 'agent', types.SimpleNamespace(run=fake_run))  # after startup
         resp = client.post(
             "/",
             json=_make_jsonrpc_body("message/send", _make_message_params("get defect 42")),

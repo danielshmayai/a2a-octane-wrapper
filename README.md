@@ -9,7 +9,7 @@ A lightweight Python service that bridges the **Google Agent-to-Agent (A2A) prot
 Once the wrapper is running (`python main.py`), you can interact with the OT ADM Agent in four different ways — no enterprise account required for options 1–3:
 
 | # | Option | Access | Best for |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Built-in Chat UI** | Browser → `http://localhost:9000` | Quick testing, demos |
 | 2 | **REST API (curl / code)** | HTTP POST to `/message:send` | Scripts, CI, custom integrations |
 | 3 | **Any A2A-compatible client** | Point at `http://localhost:9000` | Other A2A platforms |
@@ -100,33 +100,33 @@ Requires a Gemini Enterprise subscription (Standard / Plus / Frontline) and admi
 ---
 
 <a id="1-overview"></a>
+
 ## 1. Overview
 
 This service acts as a bridge between three systems:
 
-```
+```text
 Google Gemini Enterprise / A2A Client
         │
-        │  HTTP+JSON  (A2A protocol)
-        copy env.example .env
-
-        # Linux / macOS
-┌─────────────────────────────────┐
-│   A2A Opentext SDP Wrapper  :9000     │
-│   + Gemini Agent                │
-│   + per-session chat history    │
-└─────────────────────────────────┘
+        │  A2A HTTP+JSON  (POST /message:send)
+        │  A2A JSON-RPC 2.0  (POST /)
+        ▼
+┌─────────────────────────────────────┐
+│   A2A Opentext SDP Wrapper  :9000   │
+│   + Gemini ADK Agent                │
+│   + per-session conversation memory │
+└─────────────────────────────────────┘
         │
-        │  JSON-RPC 2.0  (MCP protocol)
+        │  MCP Streamable HTTP  POST /mcp
+        ▼
+┌──────────────────────────────┐
+│  Opentext SDP MCP Server     │
+│  /mcp endpoint               │
+└──────────────────────────────┘
+        │
         ▼
 ┌──────────────────────┐
-│  Opentext SDP MCP Server   │
-│  /mcp endpoint       │
-└──────────────────────┘
-        │
-        ▼
-┌──────────────────────┐
-│  Opentext SDP │
+│  Opentext SDP        │
 └──────────────────────┘
 ```
 
@@ -143,16 +143,21 @@ Without a Gemini API key it falls back to a lightweight **keyword-based router**
 ---
 
 <a id="2-architecture"></a>
+
 ## 2. Architecture
 
-```
+```text
                  ┌──────────────────────────────────────┐
                  │         FastAPI App (main.py)         │
                  │                                       │
                  │  GET  /.well-known/agent-card.json    │
-                 │  POST /message:send                   │
+                 │  POST /   (JSON-RPC 2.0 binding)      │
+                 │  POST /message:send  (HTTP+JSON)      │
                  │  GET  /tools                          │
                  │  GET  /health                         │
+                 │  GET  /config  POST /config           │
+                 │  POST /discover-tools                 │
+                 │  GET  /sim/token                      │
                  │  GET  /  (static chat UI)             │
                  └────────────────┬─────────────────────┘
                                   │
@@ -178,21 +183,22 @@ Without a Gemini API key it falls back to a lightweight **keyword-based router**
 ```
 
 | File | Role |
-|---|---|
-| `main.py` | FastAPI bootstrap, A2A endpoints, routes to Gemini agent or keyword fallback |
-| `gemini_agent.py` | Gemini function-calling agentic loop, per-session history, auto-text generation |
-| `a2a_models.py` | Pydantic models: `Message`, `Task`, `Artifact`, `AgentCard`, `AgentSkill` |
-| `mcp_client.py` | JSON-RPC 2.0 async client for the Opentext SDP MCP `/mcp` endpoint |
-| `tool_router.py` | `TOOL_REGISTRY`, `resolve_intent()`, `extract_arguments()`, `execute_tool()` |
+| --- | --- |
+| `main.py` | FastAPI bootstrap, A2A endpoints (HTTP+JSON and JSON-RPC 2.0), routes to Gemini agent or keyword fallback |
+| `gemini_agent.py` | google-adk `LlmAgent` + `Runner` + `InMemorySessionService`; per-session history, auto-text generation |
+| `a2a_models.py` | Pydantic models: `Message`, `Task`, `Artifact`, `AgentCard`, `SecurityScheme`, etc. |
+| `mcp_client.py` | Async MCP client using the official `mcp` SDK with Streamable HTTP transport |
+| `tool_router.py` | `TOOL_REGISTRY`, `resolve_intent()`, `extract_arguments()`, `execute_tool()`, `populate_registry_from_mcp()` |
 | `config.py` | Single source of truth for all env-var configuration |
 
 ---
 
 <a id="3-prerequisites"></a>
+
 ## 3. Prerequisites
 
 | Requirement | Notes |
-|---|---|
+| --- | --- |
 | Python 3.11+ | Required by `google-genai` SDK |
 | Opentext SDP MCP Server | Must be running and network-reachable |
 | Opentext SDP API key | Bearer token for authenticating MCP requests |
@@ -202,6 +208,7 @@ Without a Gemini API key it falls back to a lightweight **keyword-based router**
 ---
 
 <a id="4-setup"></a>
+
 ## 4. Setup
 
 ### 4.1 Clone and create a virtual environment
@@ -228,7 +235,7 @@ pip install -r requirements.txt
 Dependencies installed:
 
 | Package | Purpose |
-|---|---|
+| --- | --- |
 | `fastapi` | Web framework for the A2A endpoints |
 | `uvicorn[standard]` | ASGI server |
 | `httpx` | Async HTTP client for MCP calls |
@@ -275,7 +282,7 @@ MCP_REQUEST_TIMEOUT_SECONDS=30
 #### Full variable reference
 
 | Variable | Default | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `OCTANE_BASE_URL` | `http://localhost:8080` | ✅ | Base URL of the Octane MCP server |
 | `API_KEY` | _(empty)_ | ✅ | Bearer token for Octane authentication |
 | `DEFAULT_SHARED_SPACE_ID` | `1001` | ✅ | Octane shared space ID — injected into every request |
@@ -284,7 +291,14 @@ MCP_REQUEST_TIMEOUT_SECONDS=30
 | `GEMINI_MODEL` | `gemini-2.0-flash` | — | Gemini model to use |
 | `A2A_HOST` | `0.0.0.0` | — | Host to bind the wrapper to |
 | `A2A_PORT` | `9000` | — | Port to listen on |
-| `MCP_REQUEST_TIMEOUT_SECONDS` | `30` | — | Timeout (seconds) for upstream Octane calls |
+| `A2A_API_KEY` | _(empty)_ | — | Inbound bearer token for admin endpoints (`/config`, `/sim/token`, `/discover-tools`); empty disables auth |
+| `AGENT_URL` | `http://localhost:9000` | — | Public URL advertised in the AgentCard |
+| `AGENT_NAME` | `ADM Agent` | — | Agent name in the AgentCard |
+| `OAUTH2_AUTH_URL` | OTDS dev endpoint | — | OAuth2 authorization URL (advertised in AgentCard `securitySchemes`) |
+| `OAUTH2_TOKEN_URL` | OTDS dev endpoint | — | OAuth2 token URL (advertised in AgentCard `securitySchemes`) |
+| `MCP_REQUEST_TIMEOUT_SECONDS` | `10` | — | Timeout (seconds) for upstream Octane MCP calls |
+| `GEMINI_REQUEST_TIMEOUT_SECONDS` | `10` | — | Timeout (seconds) for direct Gemini calls (text pre-generation, jokes) |
+| `MCP_TOOL_POLL_INTERVAL_SECONDS` | `86400` | — | Interval for periodic MCP tool re-discovery; `0` disables |
 
 > **Where to find the Opentext SDP IDs:** In your Opentext SDP browser URL the path contains `/ui/entity-navigation?p=<sharedSpaceId>/<workspaceId>`. Use those numbers.
 
@@ -320,8 +334,8 @@ Or use the included installers:
 
 If you prefer not to block pushes, skip hooks for a single push with `git push --no-verify`.
 
-
 <a id="5-running-the-server"></a>
+
 ## 5. Running the Server
 
 ```bash
@@ -347,15 +361,22 @@ curl http://localhost:9000/tools
 ---
 
 <a id="6-api-endpoints"></a>
+
 ## 6. API Endpoints
 
 | Method | Path | Description |
-|---|---|---|
+| --- | --- | --- |
 | `GET` | `/` | Built-in chat UI |
+| `POST` | `/` | A2A JSON-RPC 2.0 binding (Gemini Enterprise default) — method `message/send` |
 | `GET` | `/.well-known/agent-card.json` | A2A AgentCard discovery endpoint |
-| `POST` | `/message:send` | Primary A2A endpoint — send a message, receive a Task |
+| `POST` | `/message:send` | A2A HTTP+JSON binding — send a message, receive a Task |
 | `GET` | `/tools` | Lists all MCP tools exposed by the Octane server |
-| `GET` | `/health` | Liveness check — returns `{"status": "ok"}` |
+| `GET` | `/health` | Liveness check — returns `{"status": "ok", "version": "..."}` |
+| `GET` | `/config` | Return current runtime configuration (auth-gated) |
+| `POST` | `/config` | Update Octane URL / API key / workspace IDs / Gemini toggle at runtime (auth-gated) |
+| `POST` | `/discover-tools` | Re-discover MCP tools from the Octane server immediately (auth-gated) |
+| `GET` | `/sim/token` | Return the configured Octane API key for Chat UI simulation (auth-gated) |
+| `GET` | `/auth-test` | OAuth2 auth flow test visualizer UI |
 
 ### Example: Calling `/message:send` directly
 
@@ -391,10 +412,11 @@ accurately (it no longer guesses from artifact counts).
 ---
 
 <a id="7-supported-tools"></a>
+
 ## 7. Supported Tools
 
 | Tool | Description | Example prompts |
-|---|---|---|
+| --- | --- | --- |
 | `get_defect` | Retrieve a defect by numeric ID | `Get defect 1314`, `Show me bug #9001` |
 | `get_story` | Retrieve a user story by numeric ID | `Get story 1234`, `Show user story 55` |
 | `get_feature` | Retrieve a feature by numeric ID | `Get feature 77`, `Show feature 200` |
@@ -404,17 +426,17 @@ accurately (it no longer guesses from artifact counts).
 | `fetch_My_Work_Items` | List the current user's assigned items | `What are my work items?`, `Show my backlog` |
 | `tell_joke` | Tell a short, contextual joke (local tool) | `Tell me a joke`, `Make me laugh`, `Something funny about defects` |
 
-
 > `sharedSpaceId` and `workSpaceId` are injected automatically from `.env` — you never need to supply them in prompts.
 
 ---
 
 <a id="8-multi-turn-conversation"></a>
+
 ## 8. Multi-turn Conversation
 
 The Gemini agent maintains **per-session conversation history**. Each session generates a stable `contextId` sent with every message, giving Gemini full context for follow-up questions.
 
-```
+```text
 User:  Get defect 1314
 Agent: Defect 1314 — "Login page crashes on empty password"
        Phase: In Progress  |  Severity: High  |  Assigned: Alice
@@ -429,26 +451,29 @@ User:  Add a funny comment
 Agent: Posted: "This bug is so slippery it should have its own LinkedIn profile."
 ```
 
-History is retained for up to **40 content blocks** per session. Refreshing the browser starts a new session.
+History is stored per session in `InMemorySessionService` (managed by the google-adk `Runner`). Refreshing the browser starts a new session.
 
 ---
 
 <a id="9-chat-ui"></a>
+
 ## 9. Chat UI
 
 A browser-based chat interface is served at `http://localhost:9000`.
 
 Features:
- - OpenText logo in the header
- - Suggestion chips for common queries (defects, stories, work items)
- - Collapsible raw Octane data under each response
- - Markdown-style bold and bullet rendering
- - `Simulate A2A` visualization toggle (defaults to OFF) — when enabled the UI replays the A2A auth flow for each message for demo purposes. The toggle does not persist across page reloads.
- - Demo auth exchange endpoint: the UI uses `/sim/token` to obtain the Octane API key when simulation is active (protected by the admin `A2A_API_KEY`).
+
+- OpenText logo in the header
+- Suggestion chips for common queries (defects, stories, work items)
+- Collapsible raw Octane data under each response
+- Markdown-style bold and bullet rendering
+- `Simulate A2A` visualization toggle (defaults to OFF) — when enabled the UI replays the A2A auth flow for each message for demo purposes. The toggle does not persist across page reloads.
+- Demo auth exchange endpoint: the UI uses `/sim/token` to obtain the Octane API key when simulation is active (protected by the admin `A2A_API_KEY`).
 
 ---
 
 <a id="10-connecting-to-google-agentspace"></a>
+
 ## 10. Connecting to Google Gemini Enterprise (formerly Agentspace)
 
 > ⚠️ **Product renamed:** Google Agentspace is now called **Gemini Enterprise**.
@@ -462,7 +487,7 @@ Features:
 > - Requires an existing **Gemini Enterprise app** (Standard / Plus / Frontline edition)
 > - Requires a **Google Workspace** account — personal Gmail does not work
 > - This feature is currently in **Preview** (pre-GA)
-
+>
 > **Official documentation:** [Register and manage A2A agents](https://docs.cloud.google.com/gemini/enterprise/docs/register-and-manage-an-a2a-agent)
 
 ---
@@ -471,7 +496,7 @@ Features:
 
 After registration, the OT ADM Agent appears in the `@` popover alongside built-in Google agents:
 
-```
+```text
 ┌────────────────────────────────────────────────┐
 │  Google Gemini Enterprise    Hello, [User]      │
 │  ─────────────────────────────────────────────  │
@@ -527,7 +552,7 @@ cloudflared tunnel --url http://localhost:9000
 **Option C — Production deployment:**
 
 | Platform | Notes |
-|---|---|
+| --- | --- |
 | **Google Cloud Run** | `gcloud run deploy a2a-octane --source . --port 9000` — auto-managed TLS |
 | **Google App Engine** | `gcloud app deploy` — auto-managed TLS |
 | **Any Linux VM** | nginx reverse proxy + Let's Encrypt (`certbot`) |
@@ -536,9 +561,9 @@ cloudflared tunnel --url http://localhost:9000
 
 ### A2A Authentication & AgentCard (new)
 
-The AgentCard advertises how clients should authenticate when invoking your agent. Recent changes introduce an OAuth2 security scheme named `adm_oauth` that exposes two flows:
+The AgentCard advertises how clients should authenticate when invoking your agent. It includes an OAuth2 security scheme named `csai_oauth` that exposes two flows:
 
-- **Authorization Code (with PKCE):** used by interactive clients (e.g. Gemini Enterprise) to obtain a user-scoped access token. The AgentCard contains `authorizationUrl` and `tokenUrl` values derived from `OAUTH2_AUTH_URL` and `OAUTH2_TOKEN_URL` in your environment.
+- **Authorization Code (with PKCE/S256):** used by interactive clients (e.g. Gemini Enterprise) to obtain a user-scoped access token. The AgentCard contains `authorizationUrl` and `tokenUrl` values derived from `OAUTH2_AUTH_URL` and `OAUTH2_TOKEN_URL` in your environment.
 - **Client Credentials:** used by non-interactive clients to obtain a machine token when appropriate.
 
 What to set in your `.env` for these values (example):
@@ -553,7 +578,8 @@ OAUTH2_TOKEN_URL=https://otdsauth.dev.ca.opentext.com/oauth2/token
 ```
 
 Notes:
-- When registering the agent with Gemini Enterprise, paste the full AgentCard JSON (fetched from `GET /.well-known/agent-card.json`) into the Cloud Console. The JSON includes `securitySchemes` describing `adm_oauth`.
+
+- When registering the agent with Gemini Enterprise, paste the full AgentCard JSON (fetched from `GET /.well-known/agent-card.json`) into the Cloud Console. The JSON includes `securitySchemes` describing `csai_oauth`.
 - Ensure any OAuth client you register (if using Authorization Code) includes the agent's public callback URIs that Gemini requires (see the Cloud Console instructions). The wrapper itself does not host the OAuth client; the AgentCard simply advertises the IdP endpoints.
 - For quick demo/test runs the UI supports a simulation mode that exchanges an admin `A2A_API_KEY` for the real Octane `API_KEY` via the `/sim/token` endpoint. This is strictly for PoC and protected by the admin key.
 
@@ -602,11 +628,27 @@ Paste the full JSON output into the **Agent card JSON** field. Example of what s
 
 ```json
 {
-  "name": "OT ADM Agent",
+  "name": "ADM Agent",
   "description": "Query and manage Opentext SDP work items — defects, stories, features, comments, and personal work lists — using natural language.",
-  "version": "1.0.0",
-  "url": "https://abc123.ngrok-free.app/message:send",
-  "capabilities": {},
+  "version": "0.1.0",
+  "url": "https://abc123.ngrok-free.app",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "supportsAuthenticatedExtendedCard": true,
+  "capabilities": { "streaming": false },
+  "securitySchemes": {
+    "csai_oauth": {
+      "type": "oauth2",
+      "flows": {
+        "clientCredentials": { "tokenUrl": "https://otdsauth.dev.ca.opentext.com/oauth2/token", "scopes": {} },
+        "authorizationCode": {
+          "authorizationUrl": "https://otdsauth.dev.ca.opentext.com/oauth2/auth",
+          "tokenUrl": "https://otdsauth.dev.ca.opentext.com/oauth2/token",
+          "pkce": true, "pkceMethod": "S256", "scopes": {}
+        }
+      }
+    }
+  },
   "skills": [
     { "id": "get_defect",          "name": "Get Defect",           "description": "Retrieve a defect by ID" },
     { "id": "get_story",           "name": "Get Story",            "description": "Retrieve a story by ID" },
@@ -614,7 +656,8 @@ Paste the full JSON output into the **Agent card JSON** field. Example of what s
     { "id": "get_comments",        "name": "Get Comments",         "description": "Get all comments for an entity" },
     { "id": "create_comment",      "name": "Create Comment",       "description": "Post a new comment" },
     { "id": "update_comment",      "name": "Update Comment",       "description": "Edit an existing comment" },
-    { "id": "fetch_My_Work_Items", "name": "Fetch My Work Items",  "description": "List the current user's work items" }
+    { "id": "fetch_My_Work_Items", "name": "Fetch My Work Items",  "description": "List the current user's work items" },
+    { "id": "tell_joke",           "name": "Tell Joke",            "description": "Tell a funny developer joke" }
   ],
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["text/plain"]
@@ -650,10 +693,10 @@ The Client ID, Client Secret, Authorization URI, and Token URI must come from a 
 
 After clicking **Finish** (or **Skip & Finish**):
 
- - The **OT ADM Agent** now appears in the Gemini Enterprise web app's `@` popover.
- - Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **OT ADM Agent**.
+- The **OT ADM Agent** now appears in the Gemini Enterprise web app's `@` popover.
+- Open **[business.gemini.google](https://business.gemini.google)**, type `@` in the chat input, and select **OT ADM Agent**.
 
-```
+```text
 @OT ADM Agent Get defect 1314
 @OT ADM Agent What are my work items?
 @OT ADM Agent Show comments on story 55
@@ -699,11 +742,10 @@ python -m webbrowser reports/report.html
 
 If you'd like a pre-commit hook that runs tests before committing, I can add a simple `pre-commit` configuration that runs `pytest` (recommended for small teams). Ask and I will add it.
 
-
 ### Networking & prerequisites checklist
 
 | Check | How to verify |
-|---|---|
+| --- | --- |
 | Discovery Engine Admin role | Cloud Console → IAM & Admin → IAM → find your account |
 | Discovery Engine API enabled | Cloud Console → APIs & Services → search "Discovery Engine API" |
 | Wrapper is running locally | `curl http://localhost:9000/health` → `{"status":"ok"}` |
@@ -715,14 +757,15 @@ If you'd like a pre-commit hook that runs tests before committing, I can add a s
 ---
 
 <a id="11-project-structure"></a>
+
 ## 11. Project Structure
 
-```
+```text
 a2a-octane-wrapper/
-├── main.py                 # FastAPI app — A2A endpoints, agent/fallback routing
-├── gemini_agent.py         # Gemini agentic loop + per-session conversation history
+├── main.py                 # FastAPI app — A2A endpoints (HTTP+JSON + JSON-RPC 2.0), agent/fallback routing
+├── gemini_agent.py         # google-adk LlmAgent + Runner + InMemorySessionService
 ├── a2a_models.py           # Pydantic models for the A2A protocol
-├── mcp_client.py           # Async HTTP JSON-RPC 2.0 client for Octane MCP
+├── mcp_client.py           # Async MCP client — official mcp SDK, Streamable HTTP transport
 ├── tool_router.py          # Tool registry, keyword fallback router, argument extraction
 ├── config.py               # All configuration loaded from environment variables
 ├── requirements.txt        # Python dependencies
@@ -738,10 +781,11 @@ a2a-octane-wrapper/
 ---
 
 <a id="12-troubleshooting"></a>
+
 ## 12. Troubleshooting
 
 | Symptom | Likely cause | Fix |
-|---|---|---|
+| --- | --- | --- |
 | `400 — Both application/json and text/event-stream required` | Missing `Accept` header | Fixed in `mcp_client.py` — no action needed |
 | `Octane HTTP error: 400` | Wrong workspace IDs or tool name | Check `/tools`; verify `DEFAULT_SHARED_SPACE_ID` / `DEFAULT_WORKSPACE_ID` in `.env` |
 | `Agent error: GEMINI_API_KEY is not set` | Missing API key | Add `GEMINI_API_KEY=...` to `.env` |
