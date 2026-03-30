@@ -18,12 +18,13 @@ from typing import Any
 
 from google import genai
 from google.adk.agents import LlmAgent
+from google.adk.planners import BuiltInPlanner
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 import config
-from a2a_models import Artifact
+from a2a_models import Artifact, Part
 from mcp_client import OctaneMcpClient, OctaneMcpError
 from tool_router import TOOL_REGISTRY, _EXCLUDED_MCP_PARAMS, execute_tool
 
@@ -43,61 +44,75 @@ B) KNOWLEDGE — answer conceptual or how-to questions from your Octane expertis
    even without calling a tool. Never refuse a question just because no tool matches.
 
 Core rules:
-  from knowledge if no tool is needed; call a tool only when live data is required.
-  If you are unsure which tool to use, reason step-by-step through the tool list.
-For ANY question about Octane concepts, entities, fields, or workflows: answer
-    from knowledge if no tool is needed; call a tool only when live data is required.
-For requests that need live data: ALWAYS prefer calling a tool over guessing.
-If you are unsure which tool to use, reason step-by-step through the tool list.
-If the user types a tool name directly, call that tool with sensible defaults.
-If the user provides a filter expression (in natural language or JSON), ALWAYS pass it to the `filter` argument of the relevant tool (such as `get_entities`).
-After receiving tool results, ALWAYS present a clear, concise summary in natural language, even if only tool calls were made. Do NOT dump raw JSON. If you have no additional insights, briefly summarize what the tool(s) returned.
-If a tool returns an error, explain it and suggest an alternative.
+- For requests needing live data: ALWAYS call a tool rather than guessing.
+- ALWAYS present a natural-language summary after tool calls. NEVER say only "Tool results returned." — always interpret and explain what the tools found.
+- If you are unsure which tool to use, reason step-by-step through the tool list.
+- If the user types a tool name directly, call that tool with sensible defaults.
 
-Reasoning workflow for queries with filters or unfamiliar entity types:
-1. Call a DISCOVERY tool first to learn entity type identifiers, field names,
-   data types, allowed enum values, and filter operators.
-2. Build correct filter arguments from that schema knowledge.
-3. Execute the query and present results.
-Never guess field names, entity type identifiers, or filter syntax — discover first.
+═══════════════════════════════════════════════════════
+MANDATORY RETRY STRATEGY — YOU MUST NEVER GIVE UP EARLY
+═══════════════════════════════════════════════════════
+When a search returns 0 results OR an error, follow ALL these steps in order:
+
+  Step 1 — Try the `keywords` parameter (broad full-text search, no filter).
+  Step 2 — If Step 1 returns empty: try `filter` with exact text match:
+            filter=["name EQ 'the exact name'"]
+  Step 3 — If Step 2 fails/empty: call get_entity_field_metadata to discover
+            the correct field name and its type (text vs. reference), then rebuild
+            the filter using the confirmed field name.
+  Step 4 — If Step 3 still fails: broaden the search (remove conditions one by one,
+            try a wildcard like name EQ '*keyword*', or try a different entityType).
+  Step 5 — ONLY after Steps 1–4 all fail: tell the user exactly what you tried,
+            what each attempt returned, and suggest what they could try next.
+
+NEVER stop at Step 1. ALWAYS reach at least Step 3 before reporting failure.
+When the user gives you a hint (e.g. "use filter", "try EQ"), incorporate it
+immediately without re-explaining — just execute the suggested approach.
+
+═══════════════════════════════════════════════════
+AQQL FILTER — FIELD TYPE RULES (CRITICAL)
+═══════════════════════════════════════════════════
+The filter parameter MUST be a JSON array, never a plain string:
+  CORRECT:  filter=["name EQ 'Plugin details missing'"]
+  WRONG:    filter="name EQ 'Plugin details missing'"
+
+Field types determine the value syntax:
+
+1. TEXT fields (name, description, label, subject, etc.) — use SINGLE QUOTES:
+     name EQ 'Plugin details missing'
+     name EQ '*Plugin*'              ← asterisk wildcard for contains
+     description EQ '*crash*'
+
+2. REFERENCE / LIST fields (phase, severity, priority, owner, type) — use {id=...}:
+     phase EQ {id='list_node.defect.phase.open'}
+     severity EQ {id='list_node.severity.high'}
+
+3. NEVER wrap text values in {id=...} — that is ONLY for list/reference fields.
+   Discover field types with get_entity_field_metadata if unsure.
+
+Operators: EQ, LT, GT, LE, GE, IN, BTW — NEVER use != or <>
+AND = ;    OR = ||    NOT = !( expression )
+Combined:  (severity EQ {id='list_node.severity.high'}) ; !(phase EQ {id='list_node.defect.phase.closed'})
+
+═══════════════════════════════════════════════════
+DISCOVERY-FIRST WORKFLOW
+═══════════════════════════════════════════════════
+For any filtered query:
+1. Call get_entity_types to confirm the entityType identifier string.
+2. Call get_entity_field_metadata to discover field names and their types.
+3. Call get_filter_metadata for allowed filter operators and enum values.
+4. Build the filter from discovered facts — NEVER guess field names or enum IDs.
 Chain as many tool calls as needed.
-
-Octane query language (AQQL) — critical rules:
-- Operators: EQ, LT, GT, LE, GE, IN, BTW — NOT != or <>
-- AND = ;   OR = ||   NOT = !()  wrapping the expression
-- Reference fields use {id='<value_id>'} not bare strings
-  e.g.  severity EQ {id='list_node.severity.high'}
-- Negation wraps the whole condition: !(phase EQ {id='list_node.defect.phase.closed'})
-- Combined example: (severity EQ {id='list_node.severity.high'} || severity EQ {id='list_node.severity.critical'}) ; !(phase EQ {id='list_node.defect.phase.closed'}) ; release EQ {id=2005}
-- List reference IDs follow the pattern list_node.<entity_type>.<field_name>.<value_name>
-  — discover the exact IDs from get_entity_field_metadata or get_filter_metadata before using them
-- NEVER use != — it is not valid Octane AQQL syntax
-- The `filter` parameter MUST be a list/array of AQQL strings, never a plain string.
-  Correct:  filter=["!(phase EQ {id='list_node.defect.phase.closed'})"]
-  Wrong:    filter="!(phase EQ {id='list_node.defect.phase.closed'})"
-
-Persistence rules — exhaust all options before reporting failure:
-- If a tool call returns an error, immediately try an alternative approach:
-    1. Retry with a simpler or broader filter (fewer conditions).
-    2. Retry without the filter to confirm the tool works at all.
-    3. Try a different discovery tool to verify field names and enum IDs.
-- Only report failure to the user after at least two distinct approaches have been tried
-  and both returned errors. Explain what you tried and why it failed.
 
 Presenting tool lists (when user asks "what tools / capabilities do you have"):
 - Format as a markdown table: | Tool | Description |
 - Group into: DISCOVERY tools (call first), READ/QUERY tools, WRITE tools.
-- After the table, add a short "Notes from your setup" section mentioning
-  workSpaceId and sharedSpaceId values, explaining the generic CRUD model, and
-  suggesting the recommended workflow (get_entity_types → get_entity_field_metadata
-  → get_entities with filter).
-- End with a proactive offer, e.g. "Want me to run get_entity_types now to see
-  what's available in your workspace?"
+- Suggest the recommended workflow (get_entity_types → get_entity_field_metadata → get_entities with filter).
 
 Presenting query results:
 - Use bullet lists or tables, not raw JSON.
 - Highlight key fields: ID, name, type, phase/status, owner, priority.
-- If results are empty, say so clearly and suggest a broader query.
+- If results are empty, say so AND explain what you searched AND suggest next steps.
 
 Context across turns:
 - Resolve "next/previous/same/that/it" from prior conversation history.
@@ -353,11 +368,20 @@ class GeminiAgent:
     def _rebuild_runner(self, mcp: OctaneMcpClient, bearer_token: str | None = None) -> None:
         """Construct a fresh LlmAgent + Runner bound to *mcp*."""
         tools = _build_tools(mcp, self._run_artifacts, bearer_token, self._run_mcp_called)
+        # Thinking is only supported by gemini-2.5-* models.
+        # BuiltInPlanner with thinking_config raises 400 on older models.
+        model_name = config.GEMINI_MODEL.lower()
+        supports_thinking = "2.5" in model_name or "thinking" in model_name
+        planner = (
+            BuiltInPlanner(thinking_config=types.ThinkingConfig(thinking_budget=8192))
+            if supports_thinking else None
+        )
         agent = LlmAgent(
             name="ot_adm_agent",
             model=config.GEMINI_MODEL,
             instruction=_build_system_prompt(),
             tools=tools,
+            **({"planner": planner} if planner else {}),
         )
         self._runner = Runner(
             app_name="ot_adm_agent",
@@ -418,6 +442,7 @@ class GeminiAgent:
         message = types.Content(role="user", parts=[types.Part(text=user_text)])
         session_id = context_id or "default"
         summary = ""
+        thought_chunks: list[str] = []
 
         # Ensure the session exists — newer ADK versions removed auto_create_session
         # from Runner, so we create it explicitly if it doesn't exist yet.
@@ -434,29 +459,85 @@ class GeminiAgent:
             session_id=session_id,
             new_message=message,
         ):
+            # Collect thought parts from any event (thinking_config produces these)
+            if event.content and event.content.parts:
+                for p in event.content.parts:
+                    if getattr(p, "thought", False) and getattr(p, "text", None):
+                        thought_chunks.append(p.text)
+
             if event.is_final_response():
                 if event.content and event.content.parts:
                     summary = "".join(
                         p.text
                         for p in event.content.parts
-                        if hasattr(p, "text") and p.text
+                        if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
                     )
                 break
 
-        # Fallback: if summary is empty but artifacts exist, synthesize a summary from artifacts
-        if not summary and self._run_artifacts:
-            artifact_summaries = []
-            for art in self._run_artifacts:
-                name = art.name or "(unnamed)"
-                # Try to extract a short preview from the first part
-                preview = ""
-                if art.parts:
-                    part = art.parts[0]
-                    if hasattr(part, "text") and part.text:
-                        preview = part.text.strip().replace("\n", " ")[:120]
-                artifact_summaries.append(f"- {name}: {preview}" if preview else f"- {name}")
-            summary = "Tool results returned.\n" + "\n".join(artifact_summaries)
+        # Prepend collected thoughts as a special artifact so the UI can display them.
+        if thought_chunks:
+            thinking_text = "\n\n".join(thought_chunks)
+            thinking_artifact = Artifact(
+                name="agent_thinking",
+                description="Agent's internal reasoning (thinking)",
+                parts=[Part(text=thinking_text)],
+                metadata={"_is_thinking": True},
+            )
+            self._run_artifacts.insert(0, thinking_artifact)
+
+        # Forced synthesis: if ADK produced no final text but tools were called,
+        # ask Gemini directly to summarize the artifact results.
+        if not summary and self._run_mcp_called[0]:
+            summary = await self._synthesize_from_artifacts(user_text, self._run_artifacts)
+
         return summary or "(no response from model)", list(self._run_artifacts), self._run_mcp_called[0]
+
+    async def _synthesize_from_artifacts(
+        self, original_question: str, artifacts: list[Artifact]
+    ) -> str:
+        """
+        Force Gemini to produce a natural-language summary when ADK finishes
+        tool calls but emits no final text response.
+        """
+        artifact_texts = []
+        for art in artifacts:
+            if art.metadata and art.metadata.get("_is_thinking"):
+                continue  # skip the thinking artifact itself
+            for p in art.parts or []:
+                if p.text:
+                    artifact_texts.append(p.text[:800])
+                elif p.data:
+                    import json as _json
+                    artifact_texts.append(_json.dumps(p.data)[:800])
+
+        if not artifact_texts:
+            return ""
+
+        prompt = (
+            "The following tool results were returned in response to this question:\n"
+            f"QUESTION: {original_question}\n\n"
+            "TOOL RESULTS:\n" + "\n---\n".join(artifact_texts) + "\n\n"
+            "Provide a clear, concise natural-language answer to the question based on these results. "
+            "Do NOT dump raw JSON. If results are empty say so and suggest alternatives."
+        )
+        try:
+            client = genai.Client(api_key=config.GEMINI_API_KEY)
+
+            def _sync():
+                return client.models.generate_content(
+                    model=config.GEMINI_MODEL,
+                    contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+                    config=types.GenerateContentConfig(),
+                )
+
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_sync), timeout=config.GEMINI_REQUEST_TIMEOUT_SECONDS
+            )
+            text = _extract_text(result).strip()
+            return text if text and "(no response" not in text else ""
+        except Exception as exc:
+            logger.warning("Synthesis fallback failed: %s", exc)
+            return ""
 
     async def _maybe_inject_generated_text(self, user_text: str) -> str:
         """
