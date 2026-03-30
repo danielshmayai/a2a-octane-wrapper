@@ -502,6 +502,37 @@
     .switch input:checked + .slider { background: #6366f1; }
     .switch input:checked + .slider:before { transform: translateX(20px); }
     .switch input:disabled + .slider { opacity: 0.4; cursor: not-allowed; }
+
+    /* Model selector dropdown */
+    .setting-group select {
+      background: #0f1117;
+      border: 1px solid #2a2d3d;
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+    .setting-group select:focus { border-color: #6366f1; }
+    .setting-group select option { background: #1a1d27; color: #e0e0e0; }
+    .model-badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .model-badge.thinking { background: #1e3a5f; color: #93c5fd; }
+    .model-badge.fast     { background: #1a2e1a; color: #6ee7b7; }
   </style>
 </head>
 <body>
@@ -543,6 +574,20 @@
         <label>WORKSPACE ID</label>
         <input id="cfg-ws" type="number" min="1" placeholder="e.g. 1002" />
       </div>
+    </div>
+    <div class="setting-group">
+      <label>AI MODEL</label>
+      <select id="cfg-model">
+        <optgroup label="Gemini 2.5 (Thinking — recommended)">
+          <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash — fast + thinking</option>
+          <option value="gemini-2.5-pro-preview-06-05">gemini-2.5-pro — most capable</option>
+        </optgroup>
+        <optgroup label="Gemini 2.0 (No thinking)">
+          <option value="gemini-2.0-flash">gemini-2.0-flash — fast, no thinking</option>
+          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite — lightest</option>
+        </optgroup>
+      </select>
+      <span class="settings-hint" id="model-hint">Gemini 2.5 models support internal reasoning (thinking). Changes take effect immediately.</span>
     </div>
     <div class="toggle-row">
       <div class="toggle-label">
@@ -815,10 +860,15 @@
       if (p.text) { summaryHtml = renderText(p.text); break; }
     }
 
-    // 2. If no Gemini summary, fall back to showing first artifact data as text
-    const artifacts = task.artifacts || [];
-    if (!summaryHtml && artifacts.length > 0) {
-      for (const p of (artifacts[0].parts || [])) {
+    const allArtifacts = task.artifacts || [];
+
+    // Separate thinking artifact from tool-call artifacts
+    const thinkingArtifact = allArtifacts.find(a => a.metadata && a.metadata._is_thinking);
+    const toolArtifacts = allArtifacts.filter(a => !(a.metadata && a.metadata._is_thinking));
+
+    // 2. If no Gemini summary, fall back to showing first tool artifact data as text
+    if (!summaryHtml && toolArtifacts.length > 0) {
+      for (const p of (toolArtifacts[0].parts || [])) {
         if (p.data !== undefined) {
           summaryHtml = `<pre>${highlightJson(JSON.stringify(p.data, null, 2))}</pre>`;
           break;
@@ -831,12 +881,26 @@
 
     if (!summaryHtml) summaryHtml = `<pre>${highlightJson(JSON.stringify(data, null, 2))}</pre>`;
 
-    // 3. Reasoning section — one collapsed block for all tool steps
+    // 3. Agent thinking — collapsed section (shows Gemini's internal reasoning)
+    let thinkingHtml = '';
+    if (thinkingArtifact) {
+      const thinkText = (thinkingArtifact.parts || []).map(p => p.text || '').join('\n').trim();
+      if (thinkText) {
+        thinkingHtml = `<details class="reasoning-block" style="margin-top:8px;border-color:#1e3a5f">
+          <summary style="background:#0f1e33">🧠 Agent thinking</summary>
+          <div class="reasoning-steps">
+            <div style="font-size:12px;color:#93c5fd;white-space:pre-wrap;line-height:1.6">${escapeHtml(thinkText)}</div>
+          </div>
+        </details>`;
+      }
+    }
+
+    // 4. Tool calls — one collapsed block for all steps
     let reasoningHtml = '';
-    if (artifacts.length > 0) {
-      const steps = artifacts.map((a, i) => buildReasoningStep(a, i)).join('');
+    if (toolArtifacts.length > 0) {
+      const steps = toolArtifacts.map((a, i) => buildReasoningStep(a, i)).join('');
       reasoningHtml = `<details class="reasoning-block">
-        <summary>Agent reasoning &amp; tool calls (${artifacts.length} step${artifacts.length !== 1 ? 's' : ''})</summary>
+        <summary>Agent reasoning &amp; tool calls (${toolArtifacts.length} step${toolArtifacts.length !== 1 ? 's' : ''})</summary>
         <div class="reasoning-steps">${steps}</div>
       </details>`;
     }
@@ -849,7 +913,7 @@
     label.textContent = 'Agent';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = summaryHtml + reasoningHtml;
+    bubble.innerHTML = summaryHtml + thinkingHtml + reasoningHtml;
     div.appendChild(label);
     div.appendChild(bubble);
     chatWindow.appendChild(div);
@@ -885,6 +949,18 @@
         } else {
           hint.textContent = cfg.gemini_enabled ? 'LLM responses active' : 'Using keyword fallback';
         }
+        // Set model dropdown to current value; add as custom option if not in list
+        const modelSel = document.getElementById('cfg-model');
+        const currentModel = cfg.gemini_model || 'gemini-2.0-flash';
+        let found = false;
+        for (const opt of modelSel.options) {
+          if (opt.value === currentModel) { opt.selected = true; found = true; break; }
+        }
+        if (!found) {
+          const opt = new Option(currentModel + ' (custom)', currentModel, true, true);
+          modelSel.add(opt);
+        }
+        updateModelHint(currentModel);
       }
     } catch (_) {
       keyHint.textContent = 'Could not load current config';
@@ -906,7 +982,7 @@
       const res = await fetch('/config', { headers: authHeaders(false) });
       if (res.ok) {
         const cfg = await res.json();
-        updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set);
+        updateGeminiIndicator(cfg.gemini_enabled, cfg.gemini_api_key_set, false, cfg.gemini_model);
       } else {
         updateGeminiIndicator(false, false, true);
       }
@@ -1007,7 +1083,7 @@
     }
   }
 
-  function updateGeminiIndicator(enabled, apiKeySet, error = false) {
+  function updateGeminiIndicator(enabled, apiKeySet, error = false, model = '') {
     const el = document.getElementById('gemini-indicator');
     const text = document.getElementById('gemini-status-text');
     if (!el || !text) return;
@@ -1017,10 +1093,13 @@
       el.title = 'Gemini status unknown (network) — click to open settings';
       return;
     }
+    const shortModel = model ? model.replace('gemini-', '').replace(/-preview.*$/, '') : '';
+    const thinkingBadge = model && model.includes('2.5')
+      ? ' <span style="font-size:10px;background:#1e3a5f;color:#93c5fd;border-radius:3px;padding:1px 5px">🧠</span>' : '';
     if (enabled) {
       el.classList.add('on'); el.classList.remove('off');
-      text.textContent = 'ON';
-      el.title = 'Gemini is active — click to open settings';
+      text.innerHTML = (shortModel ? shortModel : 'ON') + thinkingBadge;
+      el.title = `Gemini active (${model || 'unknown model'}) — click to open settings`;
     } else {
       el.classList.remove('on'); el.classList.add('off');
       text.textContent = apiKeySet ? 'OFF (fallback)' : 'OFF (no key)';
@@ -1054,6 +1133,8 @@
     if (ws)  body.workspace_id    = parseInt(ws, 10);
     const toggle = document.getElementById('cfg-gemini');
     if (!toggle.disabled) body.gemini_enabled = toggle.checked;
+    const modelSel = document.getElementById('cfg-model');
+    if (modelSel.value) body.gemini_model = modelSel.value;
 
     try {
       const res = await fetch('/config', {
@@ -1063,11 +1144,13 @@
       });
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
+        const savedModel = data.gemini_model || modelSel.value;
         statusEl.textContent = '✓ Saved! MCP client reconnected.';
         statusEl.className = 'ok';
         document.getElementById('cfg-key-hint').textContent =
           data.api_key_masked ? `Token ends in: ${data.api_key_masked.slice(-4)}` : '';
         document.getElementById('cfg-key').value = '';
+        updateModelHint(savedModel);
         // Refresh header indicator to reflect runtime Gemini state
         await refreshStatus();
         setTimeout(closeSettings, 1200);
@@ -1082,6 +1165,20 @@
       saveBtn.disabled = false;
     }
   }
+
+  function updateModelHint(modelValue) {
+    const hint = document.getElementById('model-hint');
+    if (!hint) return;
+    if (modelValue.includes('2.5')) {
+      hint.innerHTML = '🧠 <strong style="color:#93c5fd">Thinking enabled</strong> — agent reasons step-by-step before each tool call.';
+    } else {
+      hint.innerHTML = '⚡ Fast model — no internal reasoning. For complex queries, switch to gemini-2.5.';
+    }
+  }
+
+  document.getElementById('cfg-model')?.addEventListener('change', function() {
+    updateModelHint(this.value);
+  });
 
   // Close settings modal with Escape key
   document.addEventListener('keydown', e => {

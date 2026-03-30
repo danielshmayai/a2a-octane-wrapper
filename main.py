@@ -289,6 +289,7 @@ class ConfigUpdate(BaseModel):
     shared_space_id: int | None = None
     workspace_id: int | None = None
     gemini_enabled: bool | None = None
+    gemini_model: str | None = None
 
 
 def _masked_key(key: str) -> str:
@@ -308,6 +309,7 @@ async def get_config():
         "workspace_id": config.DEFAULT_WORKSPACE_ID,
         "gemini_enabled": agent is not None,
         "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+        "gemini_model": config.GEMINI_MODEL,
     })
 
 
@@ -329,6 +331,18 @@ async def update_config(body: ConfigUpdate):
     if body.workspace_id is not None:
         config.DEFAULT_WORKSPACE_ID = body.workspace_id
         changed.append("workspace_id")
+    if body.gemini_model is not None and body.gemini_model.strip():
+        config.GEMINI_MODEL = body.gemini_model.strip()
+        changed.append("gemini_model")
+        # Rebuild agent with new model if it's currently running
+        if agent is not None:
+            try:
+                agent = GeminiAgent()
+                await agent.refresh_tools(mcp)
+                logger.info("Gemini agent rebuilt with model=%s", config.GEMINI_MODEL)
+            except Exception as exc:
+                logger.warning("Failed to rebuild agent after model change: %s", exc)
+                agent = None
     if body.gemini_enabled is not None:
         if body.gemini_enabled:
             if not config.GEMINI_API_KEY:
@@ -372,6 +386,7 @@ async def update_config(body: ConfigUpdate):
         "workspace_id": config.DEFAULT_WORKSPACE_ID,
         "gemini_enabled": agent is not None,
         "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+        "gemini_model": config.GEMINI_MODEL,
     })
 
 
