@@ -7,14 +7,9 @@ The router does two things:
   2. **Result formatting** – converts the raw MCP tool result into an
       A2A Artifact that Gemini can consume.
 
-Supported tools (matching the Opentext SDP MCP server's McpToolDescriptor beans):
-  - get_defect          : Retrieve a single defect by entityId
-  - get_story           : Retrieve a single story by entityId
-  - get_feature         : Retrieve a single feature by entityId
-  - get_comments        : Retrieve comments for an entity
-  - create_comment      : Post a new comment on an entity
-  - update_comment      : Edit an existing comment
-  - fetch_My_Work_Items : List the current user's assigned work items
+The Octane MCP server exposes a generic API — all MCP tools are auto-populated
+at startup via populate_registry_from_mcp().  Only local-only tools (tell_joke)
+live in the seed registry.  Never hardcode entity-specific MCP tools here.
 """
 
 from __future__ import annotations
@@ -104,6 +99,7 @@ def populate_registry_from_mcp(tools: list[dict]) -> None:
 # Keywords map to tool names as discovered from the MCP server — update these
 # when the MCP server's tool API changes.
 
+
 _INTENT_KEYWORDS: dict[str, list[str]] = {
     "get_entities": [
         "list", "show", "get all", "find", "search", "filter",
@@ -187,42 +183,15 @@ def extract_arguments(tool_name: str, message: Message) -> dict[str, Any]:
     text = " ".join(p.text for p in message.parts if p.text) or ""
     args: dict[str, Any] = dict(TOOL_REGISTRY[tool_name]["default_arguments"])
 
-    if tool_name in ("get_defect", "get_story", "get_feature"):
-        args["entityId"] = _extract_entity_id(text)
-
-    elif tool_name == "get_comments":
+    if tool_name == "get_entity":
         args["entityId"] = _extract_entity_id(text)
         args["entityType"] = _extract_entity_type(text)
 
-    elif tool_name == "create_comment":
-        args["entityId"] = _extract_entity_id(text)
-        args["entityType"] = _extract_entity_type(text)
-        # Try to pull quoted text as the comment body
-        import re
-        quoted = re.search(r"['\"](.+?)['\"]", text)
-        if quoted:
-            args["text"] = quoted.group(1)
-        else:
-            # Everything after "saying", ":", or "comment" keyword
-            m = re.search(r"(?:saying|comment:|:)\s*(.+)$", text, re.IGNORECASE)
-            args["text"] = m.group(1).strip() if m else ""
-
-    elif tool_name == "update_comment":
-        args["entityId"] = _extract_entity_id(text)
-        args["entityType"] = _extract_entity_type(text)
-        # commentId is typically a smaller number — take the second numeric match
-        import re
-        ids = re.findall(r"#?(\d+)", text)
-        if len(ids) >= 2:
-            args["commentId"] = int(ids[0])
-            args["entityId"] = int(ids[1])
-        elif ids:
-            args["commentId"] = int(ids[0])
-        quoted = re.search(r"['\"](.+?)['\"]", text)
-        if quoted:
-            args["text"] = quoted.group(1)
-
-    # fetch_My_Work_Items needs no extra arguments beyond the injected context
+    elif tool_name == "get_entities":
+        entity_type = _extract_entity_type(text)
+        if entity_type:
+            args["entityType"] = entity_type
+        # filter extraction is left to the Gemini agent; keyword router sends no filter
 
     return args
 

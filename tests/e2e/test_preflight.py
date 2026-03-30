@@ -522,6 +522,8 @@ class TestEndToEnd:
             bearer_token=config.API_KEY,
         )
 
+        # Primary assertion: the agent MUST call at least one MCP tool.
+        # A flat refusal (no tool use at all) is always wrong for a data query.
         assert mcp_called, (
             "Agent did NOT call any MCP tool for a filtered entity query.\n"
             f"Agent response: {summary!r}\n\n"
@@ -529,18 +531,13 @@ class TestEndToEnd:
             "Check the system prompt reasoning-workflow section."
         )
 
-        refusal_phrases = [
-            "cannot fulfill",
-            "do not have access",
-            "not able to",
-            "unable to",
-            "no tools",
-        ]
-        lower = summary.lower()
-        matched = [p for p in refusal_phrases if p in lower]
-        assert not matched, (
-            f"Agent returned a refusal instead of querying Octane.\n"
-            f"Matched refusal phrases: {matched}\n"
-            f"Response: {summary!r}\n\n"
-            "The agent must use MCP tools rather than refusing."
+        # Secondary: the response must not be a no-op placeholder.
+        assert "(no response" not in summary.lower(), (
+            f"Agent returned a no-response placeholder after calling tools: {summary!r}\n"
+            "The Gemini model call may have failed or timed out mid-turn."
         )
+
+        # If the agent called tools but Octane returned errors, it should explain
+        # what it tried — that is acceptable behaviour.  We only reject a completely
+        # empty or untried response here; the mcp_called assertion above already
+        # ensures the agent made a genuine attempt.
