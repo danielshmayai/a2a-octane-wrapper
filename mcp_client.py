@@ -107,6 +107,13 @@ class OctaneMcpClient:
         OctaneMcpError on server-side errors.
         """
         arguments = dict(arguments)  # don't mutate caller's dict
+
+        # Octane's get_entities expects filter as a List<String>, not a plain string.
+        # Gemini sometimes generates it as a string — coerce it here at the boundary.
+        if tool_name == "get_entities" and isinstance(arguments.get("filter"), str):
+            f = arguments["filter"].strip()
+            arguments["filter"] = [f] if f else []
+
         arguments["sharedSpaceId"] = shared_space_id or config.DEFAULT_SHARED_SPACE_ID
         arguments["workSpaceId"] = workspace_id or config.DEFAULT_WORKSPACE_ID
 

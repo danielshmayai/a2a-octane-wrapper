@@ -72,6 +72,17 @@ Octane query language (AQQL) — critical rules:
 - List reference IDs follow the pattern list_node.<entity_type>.<field_name>.<value_name>
   — discover the exact IDs from get_entity_field_metadata or get_filter_metadata before using them
 - NEVER use != — it is not valid Octane AQQL syntax
+- The `filter` parameter MUST be a list/array of AQQL strings, never a plain string.
+  Correct:  filter=["!(phase EQ {id='list_node.defect.phase.closed'})"]
+  Wrong:    filter="!(phase EQ {id='list_node.defect.phase.closed'})"
+
+Persistence rules — exhaust all options before reporting failure:
+- If a tool call returns an error, immediately try an alternative approach:
+    1. Retry with a simpler or broader filter (fewer conditions).
+    2. Retry without the filter to confirm the tool works at all.
+    3. Try a different discovery tool to verify field names and enum IDs.
+- Only report failure to the user after at least two distinct approaches have been tried
+  and both returned errors. Explain what you tried and why it failed.
 
 Presenting tool lists (when user asks "what tools / capabilities do you have"):
 - Format as a markdown table: | Tool | Description |
