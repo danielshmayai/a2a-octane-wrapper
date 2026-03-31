@@ -1,0 +1,51 @@
+# Python virtual environments (hundreds of MB of installed packages)
+.venv/
+.venv-*/
+venv/
+env/
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test / coverage artefacts
+.pytest_cache/
+reports/
+htmlcov/
+coverage.xml
+
+# Git internals
+.git/
+
+# Node (if added later)
+node_modules/
+
+# Deployment / infra boilerplate (rarely needed during coding)
+systemd/
+.dockerignore
+docker-compose.yml
+Dockerfile
+
+# Secrets
+.env
+.env.*
+
+# Large docs (useful as reference but verbose in context)
+README.md
+design.md
+DEPLOYMENT.md
+
+# CI config
+.github/
+.githooks/
+.pre-commit-config.yaml
+
+# DeepEval cache
+.deepeval/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.suo
+*.user
