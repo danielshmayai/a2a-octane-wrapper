@@ -639,7 +639,7 @@ async def stream_message(
                 yield f"data: {json.dumps(event, default=str)}\n\n"
         except Exception as exc:
             logger.exception("Streaming agent error")
-            yield f'data: {{"type":"error","text":"Agent error: {str(exc)}"}}\n\n'
+            yield f"data: {json.dumps({'type': 'error', 'text': f'Agent error: {str(exc)}'})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

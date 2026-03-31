@@ -500,6 +500,17 @@ class GeminiAgent:
             await self._session_service.create_session(
                 app_name="ot_adm_agent", user_id="a2a_user", session_id=session_id
             )
+        elif existing.events and existing.events[-1].author == "user":
+            # A previous turn failed after ADK already wrote the user message to the
+            # session but before the model responded.  Two consecutive user-authored
+            # events would produce an invalid conversation structure that causes
+            # Gemini to return empty responses on all subsequent turns.  Remove the
+            # orphaned event before the new turn begins.
+            logger.warning(
+                "Removing orphaned user event from session=%s (previous turn failed mid-flight)",
+                session_id,
+            )
+            existing.events.pop()
 
         async for event in self._runner.run_async(
             user_id="a2a_user",
@@ -522,7 +533,14 @@ class GeminiAgent:
                         for p in event.content.parts
                         if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
                     )
-                break
+                    break
+                # is_final_response() fired with no text content (e.g. an ADK
+                # bookkeeping event).  Don't break — keep iterating to find the
+                # actual text response.
+                logger.debug(
+                    "is_final_response() with empty content (session=%s) — continuing",
+                    session_id,
+                )
 
         # Prepend collected thoughts as a special artifact so the UI can display them.
         if thought_chunks:
