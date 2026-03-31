@@ -255,6 +255,7 @@ def _make_dynamic_tool_fn(
     artifacts: list[Artifact],
     bearer_token: str | None,
     mcp_called_flag: list[bool],
+    stream_queue_ref: list | None = None,
 ) -> Any:
     """Build a typed async callable from an MCP tool's JSON Schema for ADK ingestion.
 
@@ -262,7 +263,7 @@ def _make_dynamic_tool_fn(
     Gemini FunctionDeclaration schema without any static function definition.
     """
     async def _fn(**kwargs: Any) -> str:
-        return await _invoke(tool_name, kwargs, mcp, artifacts, bearer_token, mcp_called_flag)
+        return await _invoke(tool_name, kwargs, mcp, artifacts, bearer_token, mcp_called_flag, stream_queue_ref)
 
     required_set = set(required_params)
     sig_params: list[inspect.Parameter] = []
@@ -305,6 +306,7 @@ def _build_tools(
     artifacts: list[Artifact],
     bearer_token: str | None = None,
     mcp_called_flag: list[bool] | None = None,
+    stream_queue_ref: list | None = None,
 ) -> list:
     """
     Build the ADK tool list entirely from TOOL_REGISTRY (populated by MCP discovery).
@@ -332,7 +334,7 @@ def _build_tools(
             tool_def.get("description", ""),
             tool_def.get("inputSchema", {}),
             tool_def.get("required", []),
-            mcp, artifacts, bearer_token, mcp_called_flag,
+            mcp, artifacts, bearer_token, mcp_called_flag, stream_queue_ref,
         )
         tools.append(dynamic_fn)
         logger.debug("Registered MCP tool: %s", tool_name)
@@ -348,8 +350,12 @@ async def _invoke(
     artifacts: list[Artifact],
     bearer_token: str | None = None,
     mcp_called_flag: list[bool] | None = None,
+    stream_queue_ref: list | None = None,
 ) -> str:
     """Execute one MCP tool call, append its artifact, return text for Gemini."""
+    queue = stream_queue_ref[0] if stream_queue_ref else None
+    if queue:
+        await queue.put({"type": "tool_call", "tool": tool_name, "args": dict(arguments)})
     try:
         artifact = await execute_tool(tool_name, arguments, mcp, bearer_token=bearer_token)
         artifacts.append(artifact)
@@ -357,13 +363,22 @@ async def _invoke(
             mcp_called_flag[0] = True
         texts = [p.text for p in artifact.parts if p.text]
         raw   = [str(p.data) for p in artifact.parts if p.data and not p.text]
-        return "\n".join(texts + raw) or str(artifact)
+        result_text = "\n".join(texts + raw) or str(artifact)
+        if queue:
+            await queue.put({"type": "tool_result", "tool": tool_name, "artifact": artifact.model_dump(exclude_none=True)})
+        return result_text
     except OctaneMcpError as exc:
+        error_msg = f"Opentext SDP error: {exc.message} (code {exc.code})"
+        if queue:
+            await queue.put({"type": "tool_error", "tool": tool_name, "error": error_msg})
         logger.error("SDP MCP error  tool=%s: %s", tool_name, exc)
-        return f"Opentext SDP error: {exc.message} (code {exc.code})"
+        return error_msg
     except Exception as exc:
+        error_msg = f"Unexpected error: {exc}"
+        if queue:
+            await queue.put({"type": "tool_error", "tool": tool_name, "error": error_msg})
         logger.exception("Unexpected error calling tool=%s", tool_name)
-        return f"Unexpected error: {exc}"
+        return error_msg
 
 
 # ── GeminiAgent (google-adk) ─────────────────────────────────────────
@@ -393,11 +408,13 @@ class GeminiAgent:
         # these objects. Use .clear() / [0]=False in run(), never reassign.
         self._run_artifacts: list[Artifact] = []
         self._run_mcp_called: list[bool] = [False]
+        # Holds an asyncio.Queue during streaming; None otherwise.
+        self._stream_queue_ref: list = [None]
         logger.info("GeminiAgent (ADK) ready  model=%s", config.GEMINI_MODEL)
 
     def _rebuild_runner(self, mcp: OctaneMcpClient, bearer_token: str | None = None) -> None:
         """Construct a fresh LlmAgent + Runner bound to *mcp*."""
-        tools = _build_tools(mcp, self._run_artifacts, bearer_token, self._run_mcp_called)
+        tools = _build_tools(mcp, self._run_artifacts, bearer_token, self._run_mcp_called, self._stream_queue_ref)
         # Thinking is only supported by gemini-2.5-* models.
         # BuiltInPlanner with thinking_config raises 400 on older models.
         model_name = config.GEMINI_MODEL.lower()
@@ -494,6 +511,9 @@ class GeminiAgent:
                 for p in event.content.parts:
                     if getattr(p, "thought", False) and getattr(p, "text", None):
                         thought_chunks.append(p.text)
+                        queue = self._stream_queue_ref[0]
+                        if queue:
+                            await queue.put({"type": "thinking", "text": p.text})
 
             if event.is_final_response():
                 if event.content and event.content.parts:
@@ -521,6 +541,52 @@ class GeminiAgent:
             summary = await self._synthesize_from_artifacts(user_text, self._run_artifacts)
 
         return summary or "(no response from model)", list(self._run_artifacts), self._run_mcp_called[0]
+
+    async def run_streaming(
+        self,
+        user_text: str,
+        mcp: OctaneMcpClient,
+        context_id: str = "",
+        bearer_token: str | None = None,
+    ):
+        """
+        Async generator that yields progress events as tool calls execute,
+        then yields a final "final" event with the complete result.
+
+        Event types:
+          {"type": "tool_call",   "tool": name, "args": {...}}
+          {"type": "tool_result", "tool": name, "artifact": {...}}
+          {"type": "tool_error",  "tool": name, "error": "..."}
+          {"type": "thinking",    "text": "..."}
+          {"type": "final",       "text": summary, "mcp_called": bool, "artifacts": [...]}
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        self._stream_queue_ref[0] = queue
+
+        _DONE = object()
+
+        async def _run_and_signal():
+            try:
+                return await self.run(user_text, mcp, context_id, bearer_token)
+            finally:
+                self._stream_queue_ref[0] = None
+                await queue.put(_DONE)
+
+        run_task = asyncio.create_task(_run_and_signal())
+
+        while True:
+            item = await queue.get()
+            if item is _DONE:
+                break
+            yield item
+
+        summary, artifacts, mcp_called = await run_task
+        yield {
+            "type": "final",
+            "text": summary,
+            "mcp_called": mcp_called,
+            "artifacts": [a.model_dump(exclude_none=True) for a in artifacts],
+        }
 
     async def _synthesize_from_artifacts(
         self, original_question: str, artifacts: list[Artifact]

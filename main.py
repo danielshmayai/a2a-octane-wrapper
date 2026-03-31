@@ -26,7 +26,8 @@ import asyncio
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse, FileResponse
+import json
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -428,7 +429,7 @@ def _build_agent_card() -> AgentCard:
             organization="OpenText",
             url="https://opentext.com",
         ),
-        capabilities=AgentCapabilities(streaming=False),
+        capabilities=AgentCapabilities(streaming=True),
         securitySchemes={
             "csai_oauth": SecurityScheme(
                 type="oauth2",
@@ -603,6 +604,49 @@ async def send_message(
     if agent is not None:
         return await _handle_with_agent(task_id, context_id, user_text, octane_token)
     return await _handle_with_keywords(task_id, context_id, user_text, user_msg, octane_token)
+
+
+@app.post("/message:stream")
+async def stream_message(
+    req: SendMessageRequest,
+    bearer_token: str = Depends(_extract_bearer_token),
+):
+    """
+    Streaming variant of /message:send — returns Server-Sent Events.
+    Each event is a JSON object on a `data:` line followed by double newline.
+    Final event has type="final" with the complete result.
+    """
+    user_msg = req.message
+    context_id = user_msg.contextId or str(uuid.uuid4())
+    user_text = " ".join(p.text for p in user_msg.parts if p.text) or ""
+    logger.info("A2A stream request  context=%s  text=%r", context_id, user_text)
+
+    octane_token = bearer_token
+    if config.API_KEY:
+        if not config.A2A_API_KEY:
+            octane_token = config.API_KEY
+        elif bearer_token == config.A2A_API_KEY:
+            octane_token = config.API_KEY
+
+    if agent is None:
+        async def no_agent_gen():
+            yield 'data: {"type":"error","text":"No agent configured — add GEMINI_API_KEY to .env"}\n\n'
+        return StreamingResponse(no_agent_gen(), media_type="text/event-stream")
+
+    async def event_generator():
+        try:
+            async for event in agent.run_streaming(user_text, mcp, context_id, octane_token):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except Exception as exc:
+            logger.exception("Streaming agent error")
+            yield f'data: {{"type":"error","text":"Agent error: {str(exc)}"}}\n\n'
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def _handle_with_agent(

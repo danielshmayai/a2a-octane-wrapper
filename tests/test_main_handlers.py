@@ -321,8 +321,8 @@ def test_agentcard_streaming_flag_and_post_message_send(monkeypatch):
         assert resp.status_code == 200
         card = resp.json()
         caps = card.get("capabilities", {})
-        # Expect streaming to be explicitly false for Gemini Enterprise non-streaming mode
-        assert caps.get("streaming") is False
+        # Streaming is now supported via /message:stream SSE endpoint
+        assert caps.get("streaming") is True
 
         # Verify POST / accepts JSON-RPC message/send
         rpc_body = {

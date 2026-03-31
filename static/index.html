@@ -113,6 +113,17 @@
       font-style: italic;
     }
 
+    .loading-dots::after {
+      content: '...';
+      animation: dots 1.2s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0%, 20% { content: ''; }
+      40% { content: '.'; }
+      60% { content: '..'; }
+      80%, 100% { content: '...'; }
+    }
+
     .msg .bubble pre {
       background: #0f1117;
       border: 1px solid #2a2d3d;
@@ -661,6 +672,8 @@
   let _mcpWasOnline = false; // tracks MCP online state for auto-discovery trigger
   const sendBtn = document.getElementById('send-btn');
   let msgCounter = 1;
+  function scrollToBottom() { chatWindow.scrollTop = chatWindow.scrollHeight; }
+
 
   // Stable context ID for the whole browser session — enables multi-turn memory
   const SESSION_CONTEXT_ID = 'ctx-' + Math.random().toString(36).slice(2) + Date.now();
@@ -1196,7 +1209,20 @@
     msgInput.style.height = 'auto';
     sendBtn.disabled = true;
     appendMessage('user', text);
-    const loadingEl = appendMessage('agent', 'Thinking…', { loading: true, id: 'loading-msg' });
+    // Create live agent bubble
+    const liveBubble = document.createElement('div');
+    liveBubble.className = 'message agent';
+    liveBubble.id = 'live-bubble';
+    const liveInner = document.createElement('div');
+    liveInner.className = 'bubble';
+    liveInner.innerHTML = '<span class="loading-dots">Working</span><div class="live-steps" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>';
+    liveBubble.appendChild(liveInner);
+    chatWindow.appendChild(liveBubble);
+    scrollToBottom();
+
+    const liveSteps = liveInner.querySelector('.live-steps');
+    const pendingSteps = {}; // tool_name → step element (for matching call→result)
+
     try {
       const payload = {
         message: {
@@ -1204,24 +1230,162 @@
           contextId: SESSION_CONTEXT_ID,
           role: 'ROLE_USER',
           parts: [{ text }]
-        },
-        configuration: { blocking: true }
+        }
       };
-      const res = await fetch('/message:send', {
+      const res = await fetch('/message:stream', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(payload)
       });
-      loadingEl.remove();
+
       if (!res.ok) {
+        liveBubble.remove();
         const errText = await res.text();
         appendMessage('agent', `Error ${res.status}: ${errText}`, { error: true });
         return;
       }
-      const data = await res.json();
-      renderReply(data);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData = null;
+      let thinkingChunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete line
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (raw === '[DONE]') break;
+          let event;
+          try { event = JSON.parse(raw); } catch { continue; }
+
+          if (event.type === 'tool_call') {
+            const stepIndex = liveSteps.children.length + 1;
+            const displayArgs = Object.fromEntries(
+              Object.entries(event.args || {}).filter(([k]) => k !== 'sharedSpaceId' && k !== 'workSpaceId')
+            );
+            const stepEl = document.createElement('div');
+            stepEl.className = 'reasoning-step';
+            stepEl.innerHTML = `
+              <div class="reasoning-step-header">
+                <span class="step-num">${stepIndex}</span>
+                <span class="step-tool">${escapeHtml(event.tool.toUpperCase())}</span>
+                <span class="step-spinner" style="margin-left:auto;color:#f59e0b;font-size:1em">⏳</span>
+              </div>
+              <div class="reasoning-step-body">
+                <div class="step-section-label">Request</div>
+                <pre>${highlightJson(JSON.stringify(displayArgs, null, 2))}</pre>
+                <div class="step-response"></div>
+              </div>`;
+            liveSteps.appendChild(stepEl);
+            pendingSteps[event.tool] = stepEl;
+            scrollToBottom();
+          }
+
+          else if (event.type === 'tool_result' || event.type === 'tool_error') {
+            const stepEl = pendingSteps[event.tool];
+            if (stepEl) {
+              const spinner = stepEl.querySelector('.step-spinner');
+              if (spinner) {
+                spinner.textContent = event.type === 'tool_error' ? '✗' : '✓';
+                spinner.style.color = event.type === 'tool_error' ? '#ef4444' : '#22c55e';
+              }
+              const responseDiv = stepEl.querySelector('.step-response');
+              if (responseDiv) {
+                let responseContent = '';
+                if (event.type === 'tool_error') {
+                  responseContent = event.error || 'Error';
+                } else {
+                  const artifact = event.artifact || {};
+                  for (const p of (artifact.parts || [])) {
+                    if (p.data !== undefined) { responseContent = JSON.stringify(p.data, null, 2); break; }
+                    else if (p.text) { responseContent = p.text; break; }
+                  }
+                }
+                if (responseContent) {
+                  responseDiv.innerHTML = `<div class="step-section-label" style="margin-top:8px">Response</div>
+                    <pre>${renderJsonOrText(responseContent)}</pre>`;
+                }
+              }
+              delete pendingSteps[event.tool];
+            }
+            scrollToBottom();
+          }
+
+          else if (event.type === 'thinking') {
+            thinkingChunks.push(event.text);
+          }
+
+          else if (event.type === 'final') {
+            finalData = event;
+          }
+
+          else if (event.type === 'error') {
+            liveBubble.remove();
+            appendMessage('agent', `Agent error: ${event.text}`, { error: true });
+            return;
+          }
+        }
+      }
+
+      // Finalise the live bubble in-place: replace spinner with answer,
+      // wrap tool steps in a collapsed <details> block.
+      if (finalData) {
+        // Remove the "Working..." spinner
+        const workingSpan = liveInner.querySelector('.loading-dots');
+        if (workingSpan) workingSpan.remove();
+
+        // Insert summary at the top
+        const summaryEl = document.createElement('div');
+        summaryEl.innerHTML = renderText(finalData.text || '(no response)');
+        liveInner.insertBefore(summaryEl, liveSteps);
+
+        // Insert 🧠 thinking block if we captured any thinking
+        const thinkingText = thinkingChunks.join('\n\n').trim();
+        if (thinkingText) {
+          const thinkDetails = document.createElement('details');
+          thinkDetails.className = 'reasoning-block';
+          thinkDetails.style.cssText = 'margin-top:8px;border-color:#1e3a5f';
+          thinkDetails.innerHTML = `<summary style="background:#0f1e33">🧠 Agent thinking</summary>
+            <div class="reasoning-steps"><div style="white-space:pre-wrap;font-size:0.82em;color:#94a3b8">${escapeHtml(thinkingText)}</div></div>`;
+          liveInner.insertBefore(thinkDetails, liveSteps);
+        }
+
+        // Wrap live steps in a collapsed <details> block (keep visible but collapsed)
+        const stepCount = liveSteps.children.length;
+        if (stepCount > 0) {
+          const details = document.createElement('details');
+          details.className = 'reasoning-block';
+          details.style.marginTop = '8px';
+          const detailsSummary = document.createElement('summary');
+          detailsSummary.textContent = `Agent reasoning & tool calls (${stepCount} step${stepCount !== 1 ? 's' : ''})`;
+          details.appendChild(detailsSummary);
+          const stepsWrapper = document.createElement('div');
+          stepsWrapper.className = 'reasoning-steps';
+          while (liveSteps.firstChild) stepsWrapper.appendChild(liveSteps.firstChild);
+          details.appendChild(stepsWrapper);
+          liveSteps.replaceWith(details);
+        } else {
+          liveSteps.remove();
+        }
+
+        liveBubble.removeAttribute('id');
+        scrollToBottom();
+      } else {
+        liveBubble.remove();
+        appendMessage('agent', '(no response from agent)', { error: true });
+      }
+
     } catch (err) {
-      if (document.getElementById('loading-msg')) document.getElementById('loading-msg').remove();
+      if (document.getElementById('live-bubble')) document.getElementById('live-bubble').remove();
       appendMessage('agent', 'Network error: ' + err.message, { error: true });
     } finally {
       sendBtn.disabled = false;
