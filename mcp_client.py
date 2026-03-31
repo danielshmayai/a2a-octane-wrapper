@@ -116,10 +116,11 @@ class OctaneMcpClient:
             elif isinstance(f, str) and not f.strip():
                 arguments["filter"] = None
 
-            # Octane requires keywords to be non-null when filter is present.
-            # Pass an empty string so the server doesn't reject the request.
-            if arguments.get("filter") and arguments.get("keywords") is None:
-                arguments["keywords"] = ""
+            # Octane requires a non-empty keywords value when filter is present.
+            # Empty string causes "Argument should not be null" — use '*' as wildcard.
+            kw = arguments.get("keywords")
+            if arguments.get("filter") and (kw is None or (isinstance(kw, str) and not kw.strip())):
+                arguments["keywords"] = "*"
 
         arguments["sharedSpaceId"] = shared_space_id or config.DEFAULT_SHARED_SPACE_ID
         arguments["workSpaceId"] = workspace_id or config.DEFAULT_WORKSPACE_ID

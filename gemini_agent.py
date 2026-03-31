@@ -70,11 +70,12 @@ When a search returns 0 results OR an error, follow ALL these steps in order:
 
   Step 1 — Resolve any named references (release, sprint, team) to numeric IDs
             using get_entities with keywords. Do this BEFORE any filtered query.
-  Step 2 — Try the `keywords` parameter (broad full-text search) on the target type.
-  Step 3 — If Step 2 returns empty: try `filter` with the resolved IDs and field names
-            discovered via get_entity_field_metadata.
-  Step 4 — If Step 3 fails/empty: broaden the search (remove conditions one by one,
-            try wildcards like name EQ '*keyword*', try broader entityType).
+  Step 2 — Build an AQQL filter using resolved IDs and known enum patterns
+            (e.g. severity EQ {id='list_node.severity.critical'}).
+            Use keywords='*' when you have no additional text to search for.
+  Step 3 — If Step 2 returns empty: broaden — remove one condition at a time
+            (e.g. drop severity, try a different entityType like work_item).
+  Step 4 — If Step 3 still empty: try keywords-only search without filter.
   Step 5 — ONLY after Steps 1–4 all fail: tell the user exactly what you tried,
             what each attempt returned, and suggest what they could try next.
 
@@ -85,48 +86,52 @@ immediately without re-explaining — just execute the suggested approach.
 ═══════════════════════════════════════════════════
 AQQL FILTER — FIELD TYPE RULES (CRITICAL)
 ═══════════════════════════════════════════════════
-The filter parameter MUST be a JSON array, never a plain string:
-  CORRECT:  filter=["name EQ 'Plugin details missing'"]
-  WRONG:    filter="name EQ 'Plugin details missing'"
+The `filter` parameter is a plain STRING (not an array, not a list):
+  CORRECT:  filter="severity EQ {id='list_node.severity.critical'} ; release EQ {id=1005}"
+  WRONG:    filter=["severity EQ {id='list_node.severity.critical'}"]
 
 Field types determine the value syntax:
 
-1. TEXT fields (name, description, label, subject, etc.) — use SINGLE QUOTES:
+1. TEXT fields (name, description, label, subject) — use SINGLE QUOTES:
      name EQ 'Plugin details missing'
      name EQ '*Plugin*'              ← asterisk wildcard for contains
-     description EQ '*crash*'
 
-2. REFERENCE / LIST fields (phase, severity, priority, owner, type) — use {id=...}:
-     phase EQ {id='list_node.defect.phase.open'}
+2. LIST/ENUM fields (severity, priority, phase, status) — use {id='list_node.<field>.<value>'}:
+     severity EQ {id='list_node.severity.critical'}
      severity EQ {id='list_node.severity.high'}
+     severity EQ {id='list_node.severity.medium'}
+     severity EQ {id='list_node.severity.low'}
+     priority EQ {id='list_node.priority.urgent'}
+     phase EQ {id='list_node.defect.phase.open'}
+   ← These are the confirmed working patterns from get_filter_metadata.
+     Do NOT call get_entity_field_metadata to find severity/priority values —
+     it returns opaque numeric tokens, not enum strings.
 
-3. NUMERIC reference (release, sprint by ID):
+3. REFERENCE fields (release, sprint, team — resolved to numeric IDs):
      release EQ {id=1005}      ← numeric, NO quotes around the number
      sprint EQ {id=2001}
 
-4. NEVER wrap text values in {id=...} — that is ONLY for list/reference fields.
-   Discover field types with get_entity_field_metadata if unsure.
-
-5. CRITICAL: The `filter` parameter is a plain STRING, not an array.
-   CORRECT:  filter="severity EQ {id='list_node.severity.critical'} ; release EQ {id=1005}"
-   WRONG:    filter=["severity EQ {id='list_node.severity.critical'}"]
-
-6. CRITICAL: When using `filter`, ALWAYS also pass keywords="" (empty string).
-   Omitting keywords when filter is set causes a server error.
-   Example:  get_entities(entityType='defect', filter="...", keywords="")
+4. CRITICAL: When using `filter`, ALWAYS also pass a non-empty keywords value.
+   Use keywords='*' when you have no specific keyword to restrict results.
+   Empty string or missing keywords causes a server error.
+   Example:  get_entities(entityType='defect', filter="...", keywords='*')
 
 Operators: EQ, LT, GT, LE, GE, IN, BTW — NEVER use != or <>
 AND = ;    OR = ||    NOT = !( expression )
-Combined:  severity EQ {id='list_node.severity.high'} ; release EQ {id=1005} ; !(phase EQ {id='list_node.defect.phase.closed'})
+Full example: filter="severity EQ {id='list_node.severity.critical'} ; release EQ {id=1005}"
 
 ═══════════════════════════════════════════════════
 DISCOVERY-FIRST WORKFLOW
 ═══════════════════════════════════════════════════
 For any filtered query:
 1. Call get_entity_types to confirm the entityType identifier string.
-2. Call get_entity_field_metadata to discover field names and their types.
-3. Call get_filter_metadata for allowed filter operators and enum values.
-4. Build the filter from discovered facts — NEVER guess field names or enum IDs.
+2. Call get_filter_metadata — this returns working filter syntax AND enum examples.
+   NOTE: get_entity_field_metadata returns opaque numeric tokens, not field names —
+   it is useful only for confirming a field exists, not for building filter values.
+3. Resolve any named references (release/sprint name → numeric ID via get_entities).
+4. Build the filter using confirmed syntax — THEN immediately call get_entities.
+   Do NOT call get_entity_types again after step 1. Do NOT re-run discovery after
+   resolving references — just build the filter and execute it.
 Chain as many tool calls as needed.
 
 Presenting tool lists (when user asks "what tools / capabilities do you have"):
