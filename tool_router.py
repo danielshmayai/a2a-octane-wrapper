@@ -49,6 +49,17 @@ _LOCAL_ONLY_TOOLS: frozenset[str] = frozenset({"tell_joke"})
 # Params auto-injected by mcp_client — never exposed to Gemini or the router
 _EXCLUDED_MCP_PARAMS: frozenset[str] = frozenset({"sharedSpaceId", "workSpaceId"})
 
+# The Octane MCP server ships incorrect descriptions for several parameters
+# (all labelled "Shared Space ID"). These overrides correct them.
+_PARAM_DESCRIPTION_OVERRIDES: dict[str, str] = {
+    "entityId":      "Numeric ID of the entity to retrieve.",
+    "fields":        "Comma-separated list of field names to include in the response (e.g. 'id,name,severity').",
+    "search_fields": "Comma-separated list of fields to search within when using the keywords parameter.",
+    "filter":        "AQQL filter string (e.g. \"severity EQ {id='list_node.severity.critical'}\"). Use ';' for AND, '||' for OR.",
+    "keywords":      "Full-text search keywords. Required (use '*' as wildcard) when filter is set.",
+    "entityType":    "Entity type identifier (e.g. 'defect', 'story', 'release'). Use get_entity_types to discover valid values.",
+}
+
 
 def populate_registry_from_mcp(tools: list[dict]) -> None:
     """
@@ -77,9 +88,10 @@ def populate_registry_from_mcp(tools: list[dict]) -> None:
                 r for r in t.get("inputSchema", {}).get("required", [])
                 if r not in _EXCLUDED_MCP_PARAMS
             ],
-            # Full property schemas (with types) needed for dynamic ADK tool generation
+            # Full property schemas (with types) needed for dynamic ADK tool generation.
+            # Apply description overrides for params where the MCP server is wrong.
             "inputSchema": {
-                k: v
+                k: {**v, "description": _PARAM_DESCRIPTION_OVERRIDES.get(k, v.get("description", ""))}
                 for k, v in t.get("inputSchema", {}).get("properties", {}).items()
                 if k not in _EXCLUDED_MCP_PARAMS
             },
